@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { IPortfolio, IPortfolioGroup } from '../types/domain';
-import { DateTimeStandardizer } from '../engine/DateTimeStandardizer';
+import { PortfolioCard } from './PortfolioCard';
 import { CreatePortfolioModal } from './modals/CreatePortfolioModal';
 import { ConfirmDeleteModal } from './modals/ConfirmDeleteModal';
 import { CreateGroupModal } from './modals/CreateGroupModal';
@@ -13,14 +13,10 @@ import {
   FolderPlus, 
   Folder, 
   Archive, 
-  MoreVertical, 
-  Edit3, 
-  FolderInput, 
   Trash2, 
   ChevronDown, 
   ChevronUp,
-  Briefcase,
-  ChevronRight
+  Briefcase
 } from 'lucide-react';
 
 export const DashboardView: React.FC = () => {
@@ -29,7 +25,7 @@ export const DashboardView: React.FC = () => {
     activeGroupId,
     loadFromStorage,
     setActiveGroupId,
-    setSelectedPortfolioId, // НОВОЕ: Открытие портфеля
+    setSelectedPortfolioId,
     createPortfolio,
     renamePortfolio,
     deletePortfolio,
@@ -47,7 +43,6 @@ export const DashboardView: React.FC = () => {
   const [movingPortfolio, setMovingPortfolio] = useState<IPortfolio | null>(null);
 
   const [showDebug, setShowDebug] = useState(false);
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     loadFromStorage();
@@ -142,76 +137,14 @@ export const DashboardView: React.FC = () => {
       {visiblePortfolios.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {visiblePortfolios.map(portfolio => (
-            <div
+            <PortfolioCard
               key={portfolio.id}
-              onClick={() => setSelectedPortfolioId(portfolio.id)} // Клик открывает детальный вид
-              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition-all relative group cursor-pointer"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="font-bold text-lg leading-snug group-hover:text-sky-500 transition-colors">
-                    {portfolio.name}
-                  </h3>
-                  <span className="text-xs text-slate-400 font-mono">
-                    Создан: {DateTimeStandardizer.formatToLocalDisplay(portfolio.createdAt).split(' ')[0]}
-                  </span>
-                </div>
-
-                <div className="relative" onClick={e => e.stopPropagation()}>
-                  <button
-                    onClick={() => setActiveMenuId(activeMenuId === portfolio.id ? null : portfolio.id)}
-                    className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
-                  >
-                    <MoreVertical className="w-5 h-5" />
-                  </button>
-
-                  {activeMenuId === portfolio.id && (
-                    <div className="absolute right-0 top-8 z-10 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-1 space-y-0.5 text-sm animate-in fade-in duration-150">
-                      <button
-                        onClick={() => {
-                          setEditingPortfolio(portfolio);
-                          setActiveMenuId(null);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-left"
-                      >
-                        <Edit3 className="w-4 h-4" />
-                        <span>Переименовать</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setMovingPortfolio(portfolio);
-                          setActiveMenuId(null);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-left"
-                      >
-                        <FolderInput className="w-4 h-4" />
-                        <span>Переместить</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setDeletingPortfolio(portfolio);
-                          setActiveMenuId(null);
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-lg text-left"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        <span>Удалить</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">Точек среза: {portfolio.milestones.length}</span>
-                <span className="text-sky-500 font-semibold flex items-center gap-1">
-                  <span>Открыть</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </span>
-              </div>
-            </div>
+              portfolio={portfolio}
+              onOpen={() => setSelectedPortfolioId(portfolio.id)}
+              onRename={() => setEditingPortfolio(portfolio)}
+              onMove={() => setMovingPortfolio(portfolio)}
+              onDelete={() => setDeletingPortfolio(portfolio)}
+            />
           ))}
         </div>
       ) : (
@@ -229,7 +162,7 @@ export const DashboardView: React.FC = () => {
         </div>
       )}
 
-      {/* СКЛАД */}
+      {/* СКЛАД: Сворачиваемая песочница */}
       <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
         <button
           onClick={() => setShowDebug(!showDebug)}
