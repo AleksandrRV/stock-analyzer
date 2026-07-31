@@ -1,14 +1,15 @@
-// Группа портфелей (Папка)
-export interface IPortfolioGroup {
-  id: string;
-  name: string;
-  isArchive?: boolean;
+// Данные о сплите/консолидации
+export interface IStockSplit {
+  ticker: string;
+  date: string; // ISO 8601 UTC (Дата, когда торги пошли по новой цене)
+  coefficient: number; // New Shares / Old Shares. (Сплит 1 к 100 = 100. Консолидация 5000 к 1 = 0.0002)
 }
 
 // Глобальные настройки приложения
 export interface IGlobalSettings {
   dividendTaxRate: number; // по умолчанию 15%
   tickerRenames: ITickerRename[];
+  stockSplits?: IStockSplit[]; // Пользовательские сплиты
 }
 
 // Переименование тикера
@@ -31,7 +32,7 @@ export interface IAssetAllocation {
 // Контрольная точка (Milestone)
 export interface IMilestone {
   id: string;
-  date: string; // ISO 8601 UTC
+  date: string; // ISO 8601 UTC (часы зафиксированы, минуты=00, секунды=00)
   assets: IAssetAllocation[];
 }
 
@@ -43,6 +44,13 @@ export interface IPortfolio {
   createdAt: string; // ISO 8601 UTC
   closedAt: string | null; // ISO 8601 UTC или null
   milestones: IMilestone[];
+}
+
+// Группа портфелей (Папка)
+export interface IPortfolioGroup {
+  id: string;
+  name: string;
+  isArchive?: boolean;
 }
 
 // Запись цены в IndexedDB
@@ -64,8 +72,8 @@ export interface IDividendHistory {
 
 // Структура файла бэкапа JSON
 export interface IExportData {
-  schemaVersion: number; // Версия схемы (1)
-  exportedAt: string;    // ISO дата экспортного файла
+  schemaVersion: number;
+  exportedAt: string;
   settings: IGlobalSettings;
   groups: IPortfolioGroup[];
   portfolios: IPortfolio[];

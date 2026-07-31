@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { marketDb } from '../db/marketDb';
 import { FilePortabilityService } from '../services/storage/filePortability';
-import { DEFAULT_TICKER_RENAMES } from '../engine/TickerResolver';
+import { DEFAULT_TICKER_RENAMES, DEFAULT_STOCK_SPLITS } from '../engine/TickerResolver';
 import { IExportData } from '../types/domain';
-import { ManualDividendsModal } from './modals/ManualDividendsModal'; // Импорт модалки
+import { ManualDividendsModal } from './modals/ManualDividendsModal';
 
 import { 
   Sliders, 
@@ -17,7 +17,8 @@ import {
   AlertCircle, 
   RefreshCw,
   HardDrive,
-  Coins
+  Coins,
+  Scissors
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -28,18 +29,25 @@ export const SettingsView: React.FC = () => {
     updateSettings, 
     addCustomTickerRename, 
     removeCustomTickerRename,
+    addCustomSplit,
+    removeCustomSplit,
     restoreFullData 
   } = usePortfolioStore();
 
   const [cacheStats, setCacheStats] = useState({ pricesCount: 0, dividendsCount: 0 });
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
-  // Модалка ручных дивидендов
   const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
 
+  // Поля смены тикера
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [changeDate, setChangeDate] = useState('');
+
+  // Поля сплита
+  const [splitTicker, setSplitTicker] = useState('');
+  const [splitDate, setSplitDate] = useState('');
+  const [splitCoef, setSplitCoef] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,6 +116,23 @@ export const SettingsView: React.FC = () => {
     setNewTicker('');
     setChangeDate('');
     showToast('success', 'Правило переименования тикера добавлено');
+  };
+
+  const handleAddSplit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const parsedCoef = parseFloat(splitCoef);
+    if (!splitTicker || !splitDate || isNaN(parsedCoef) || parsedCoef <= 0) return;
+
+    addCustomSplit({
+      ticker: splitTicker.trim().toUpperCase(),
+      date: `${splitDate}T00:00:00.000Z`,
+      coefficient: parsedCoef,
+    });
+
+    setSplitTicker('');
+    setSplitDate('');
+    setSplitCoef('');
+    showToast('success', 'Правило сплита акции добавлено');
   };
 
   const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
@@ -223,6 +248,7 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
+        {/* Налог на дивиденды с поддержкой 0% */}
         <div className="space-y-2 max-w-xs">
           <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">
             Ставка налога на дивиденды (%):
@@ -236,7 +262,6 @@ export const SettingsView: React.FC = () => {
               value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate}
               onChange={e => {
                 const val = e.target.value;
-                // Если пользователь стер значение, сохраняем 0
                 if (val === '') {
                   updateSettings({ dividendTaxRate: 0 });
                 } else {
@@ -247,7 +272,6 @@ export const SettingsView: React.FC = () => {
                 }
               }}
               onBlur={e => {
-                // Страховка: если при потере фокуса поле пустое или NaN, ставим 0
                 const parsed = parseFloat(e.target.value);
                 if (isNaN(parsed)) {
                   updateSettings({ dividendTaxRate: 0 });
@@ -259,7 +283,8 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-4 pt-2 border-t border-slate-100 dark:border-slate-700/60">
+        {/* Менеджер смены тикеров */}
+        <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
           <div className="flex items-center justify-between">
             <div>
               <h4 className="font-semibold text-sm">Машина времени тикеров (Corporate Actions)</h4>
@@ -300,7 +325,7 @@ export const SettingsView: React.FC = () => {
             </button>
           </form>
 
-          <div className="space-y-1.5 max-h-48 overflow-y-auto text-xs font-mono pr-1">
+          <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs font-mono pr-1">
             {(settings.tickerRenames || []).map(rule => (
               <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 rounded-lg">
                 <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
@@ -318,6 +343,72 @@ export const SettingsView: React.FC = () => {
             ))}
           </div>
         </div>
+
+        {/* НОВОЕ: Менеджер сплитов (Splits) */}
+        <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
+          <div className="flex items-center justify-between">
+            <div>
+              <h4 className="font-semibold text-sm flex items-center gap-1.5">
+                <Scissors className="w-4 h-4 text-amber-500" />
+                <span>Дробление и консолидация акций (Сплиты)</span>
+              </h4>
+              <p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые (Сплит 1 к 100 = 100. Консолидация = 0.0002)</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleAddSplit} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
+            <input
+              type="text"
+              required
+              placeholder="Тикер (TRNFP)"
+              value={splitTicker}
+              onChange={e => setSplitTicker(e.target.value.toUpperCase())}
+              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
+            />
+            <input
+              type="date"
+              required
+              value={splitDate}
+              onChange={e => setSplitDate(e.target.value)}
+              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
+            />
+            <input
+              type="number"
+              step="0.0001"
+              required
+              placeholder="Коэфф (100)"
+              value={splitCoef}
+              onChange={e => setSplitCoef(e.target.value)}
+              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
+            />
+            <button
+              type="submit"
+              className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Добавить</span>
+            </button>
+          </form>
+
+          <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs font-mono pr-1">
+            {(settings.stockSplits || []).map(split => (
+              <div key={split.ticker} className="flex items-center justify-between p-2 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                <span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span>
+                <button onClick={() => removeCustomSplit(split.ticker)} className="text-rose-500 hover:text-rose-600">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+
+            {DEFAULT_STOCK_SPLITS.map(split => (
+              <div key={split.ticker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500">
+                <span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span>
+                <span className="text-[10px] text-slate-400 italic">Системное</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
       </div>
 
       {/* 4. РЫНОЧНЫЙ КЭШ */}

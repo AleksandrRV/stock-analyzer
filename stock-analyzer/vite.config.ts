@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // ВАЖНО: Путь к репозиторию на GitHub Pages
+  base: '/stock-analyzer/',
   plugins: [
     react(),
     VitePWA({
@@ -16,6 +18,8 @@ export default defineConfig({
         background_color: '#0f172a',
         display: 'standalone',
         orientation: 'any',
+        scope: '/stock-analyzer/',
+        start_url: '/stock-analyzer/',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -37,9 +41,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        navigateFallback: 'index.html',
-        // Не кэшируем сетевые запросы к Мосбирже через Service Worker, 
-        // так как они кэшируются напрямую в IndexedDB через Dexie.js!
+        navigateFallback: '/stock-analyzer/index.html',
         navigateFallbackDenylist: [/^\/iss\.moex\.com/],
       }
     })
