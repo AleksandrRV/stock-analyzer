@@ -6,14 +6,14 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 export function usePortfolioCalculation(portfolio: IPortfolio) {
   const { calculationsCache, setCalculationCache } = usePortfolioStore();
   
-  // Если портфель уже был рассчитан и лежит в глобальном кэше — сразу отдаем его (0ms delay)
-  const cachedResult = calculationsCache[portfolio.id] || null;
+  // Если портфель уже был рассчитан и лежит в глобальном кэше — сразу отдаем его
+  const cachedResult: ICalculatedPortfolio | null = calculationsCache[portfolio.id] || null;
   
   // Если кэша нет — показываем загрузку
   const [loading, setLoading] = useState<boolean>(!cachedResult);
 
   useEffect(() => {
-    // Если результат уже есть в кэше — не делаем абсолютно ничего!
+    // Если результат уже есть в кэше — не делаем ничего
     if (calculationsCache[portfolio.id]) {
       return;
     }
@@ -24,7 +24,6 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     PortfolioCalculationService.calculatePortfolio(portfolio)
       .then(res => {
         if (isMounted) {
-          // Сохраняем результат в глобальный кэш Zustand
           setCalculationCache(portfolio.id, res);
           setLoading(false);
         }
