@@ -32,7 +32,7 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
   const [customStart, setCustomStart] = useState('');
   const [customFinish, setCustomFinish] = useState('');
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const getExactDateMonthsAgo = (baseDate: Date, monthsAgo: number): Date => {
     const d = new Date(baseDate);

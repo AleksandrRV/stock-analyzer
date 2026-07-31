@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePortfolioStore } from '../store/usePortfolioStore';
-import { IMilestone } from '../types/domain';
+import { IMilestone, IAssetAllocation } from '../types/domain';
 import { DateTimeStandardizer } from '../engine/DateTimeStandardizer';
 import { TickerResolver } from '../engine/TickerResolver';
 import { MilestoneEditorModal } from './milestones/MilestoneEditorModal';
@@ -67,7 +67,7 @@ export const PortfolioDetailView: React.FC = () => {
   const latestMilestoneDateIso = sortedMilestones.length > 0 ? sortedMilestones[0].date : null;
 
   const handleOpenNewMilestone = () => {
-    let prefilledAssets = [];
+    let prefilledAssets: IAssetAllocation[] = [];
     if (sortedMilestones.length > 0) {
       prefilledAssets = sortedMilestones[0].assets.map(a => ({ ...a }));
     }

@@ -7,15 +7,15 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.ico', 'pwa-192x192.png', 'pwa-512x512.png'],
       manifest: {
-        name: 'Анализатор фондовых стратегий',
-        short_name: 'Стратегии MOEX',
+        name: 'Анализатор фондовых стратегий MOEX',
+        short_name: 'MOEX Стратегии',
         description: 'Оффлайн-платформа бэктестинга и анализа портфельных стратегий',
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
-        orientation: 'portrait',
+        orientation: 'any',
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -36,7 +36,11 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}']
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallback: 'index.html',
+        // Не кэшируем сетевые запросы к Мосбирже через Service Worker, 
+        // так как они кэшируются напрямую в IndexedDB через Dexie.js!
+        navigateFallbackDenylist: [/^\/iss\.moex\.com/],
       }
     })
   ]
