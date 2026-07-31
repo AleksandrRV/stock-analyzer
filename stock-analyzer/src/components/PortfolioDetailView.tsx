@@ -6,6 +6,7 @@ import { TickerResolver } from '../engine/TickerResolver';
 import { MilestoneEditorModal } from './milestones/MilestoneEditorModal';
 import { ClosePortfolioModal } from './modals/ClosePortfolioModal';
 import { usePortfolioCalculation } from '../hooks/usePortfolioCalculation';
+import { PortfolioChart } from './analytics/PortfolioChart'; // Импорт Графика
 
 import { 
   ArrowLeft, 
@@ -57,7 +58,6 @@ export const PortfolioDetailView: React.FC = () => {
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
 
-  // Самая свежая точка для ограничения даты закрытия
   const latestMilestoneDateIso = sortedMilestones.length > 0 ? sortedMilestones[0].date : null;
 
   const handleOpenNewMilestone = () => {
@@ -95,9 +95,9 @@ export const PortfolioDetailView: React.FC = () => {
 
   const handleToggleClosePortfolio = () => {
     if (portfolio.closedAt) {
-      closePortfolio(portfolio.id, null); // Открыть портфель
+      closePortfolio(portfolio.id, null);
     } else {
-      setIsCloseModalOpen(true); // Открыть модалку выбора даты закрытия
+      setIsCloseModalOpen(true);
     }
   };
 
@@ -162,53 +162,58 @@ export const PortfolioDetailView: React.FC = () => {
           <span>Загрузка цен, дивидендов и индексов MOEX...</span>
         </div>
       ) : result && portfolio.milestones.length > 0 ? (
-        <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">
-              Результат стратегии (За {result.totalDays} дней)
-            </span>
+        <div className="space-y-6">
+          <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">
+                Результат стратегии (За {result.totalDays} дней)
+              </span>
 
-            <div className={`px-3 py-1 rounded-full border text-xs font-mono font-bold flex items-center gap-1.5 w-fit ${
-              result.performanceColor === 'GREEN'
-                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                : result.performanceColor === 'YELLOW'
-                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-            }`}>
-              {result.alphaMonthlyPercent >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              <span>Альфа: {result.alphaMonthlyPercent >= 0 ? '+' : ''}{result.alphaMonthlyPercent.toFixed(2)}% / мес</span>
+              <div className={`px-3 py-1 rounded-full border text-xs font-mono font-bold flex items-center gap-1.5 w-fit ${
+                result.performanceColor === 'GREEN'
+                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                  : result.performanceColor === 'YELLOW'
+                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+              }`}>
+                {result.alphaMonthlyPercent >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                <span>Альфа: {result.alphaMonthlyPercent >= 0 ? '+' : ''}{result.alphaMonthlyPercent.toFixed(2)}% / мес</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-sm">
+              <div>
+                <span className="text-[11px] text-slate-400 block">Общий профит:</span>
+                <span className={`text-lg font-bold ${result.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {result.totalProfitPercent >= 0 ? '+' : ''}{result.totalProfitPercent.toFixed(2)}%
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-slate-400 block">В месяц (CAGR):</span>
+                <span className={`text-lg font-bold ${result.monthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {result.monthlyReturnPercent >= 0 ? '+' : ''}{result.monthlyReturnPercent.toFixed(2)}%
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-slate-400 block">Годовая (CAGR):</span>
+                <span className={`text-lg font-bold ${result.annualizedReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {result.annualizedReturnPercent >= 0 ? '+' : ''}{result.annualizedReturnPercent.toFixed(2)}%
+                </span>
+              </div>
+
+              <div>
+                <span className="text-[11px] text-slate-400 block">MCFTR (в мес):</span>
+                <span className={`text-lg font-bold ${result.mcftrMonthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {result.mcftrMonthlyReturnPercent >= 0 ? '+' : ''}{result.mcftrMonthlyReturnPercent.toFixed(2)}%
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-sm">
-            <div>
-              <span className="text-[11px] text-slate-400 block">Общий профит:</span>
-              <span className={`text-lg font-bold ${result.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {result.totalProfitPercent >= 0 ? '+' : ''}{result.totalProfitPercent.toFixed(2)}%
-              </span>
-            </div>
-
-            <div>
-              <span className="text-[11px] text-slate-400 block">В месяц (CAGR):</span>
-              <span className={`text-lg font-bold ${result.monthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {result.monthlyReturnPercent >= 0 ? '+' : ''}{result.monthlyReturnPercent.toFixed(2)}%
-              </span>
-            </div>
-
-            <div>
-              <span className="text-[11px] text-slate-400 block">Годовая (CAGR):</span>
-              <span className={`text-lg font-bold ${result.annualizedReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {result.annualizedReturnPercent >= 0 ? '+' : ''}{result.annualizedReturnPercent.toFixed(2)}%
-              </span>
-            </div>
-
-            <div>
-              <span className="text-[11px] text-slate-400 block">MCFTR (в мес):</span>
-              <span className={`text-lg font-bold ${result.mcftrMonthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                {result.mcftrMonthlyReturnPercent >= 0 ? '+' : ''}{result.mcftrMonthlyReturnPercent.toFixed(2)}%
-              </span>
-            </div>
-          </div>
+          {/* ОБНОВЛЕННЫЙ БЛОК: ИНТЕРАКТИВНЫЙ ГРАФИК С ДИНАМИЧЕСКИМ БАЗЛАЙНОМ 0.00% */}
+          <PortfolioChart portfolio={portfolio} calculatedPortfolio={result} />
         </div>
       ) : null}
 
@@ -257,7 +262,6 @@ export const PortfolioDetailView: React.FC = () => {
                           <Clock className="w-4 h-4 text-slate-400" />
                           <span>{DateTimeStandardizer.formatToLocalDisplay(milestone.date)}</span>
                           
-                          {/* ДЛИТЕЛЬНОСТЬ ТОЧКИ (В ДНЯХ ИЛИ ЧАСАХ) */}
                           {calcMs && (
                             <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 text-xs font-semibold rounded-md">
                               {calcMs.durationDays >= 1 ? `${calcMs.durationDays} дн.` : `${calcMs.durationHours} ч.`}
@@ -268,7 +272,6 @@ export const PortfolioDetailView: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* ДОХОДНОСТЬ И ДЕЛЬТА MCFTR НА УРОВНЕ ТОЧКИ */}
                     <div className="flex items-center gap-3">
                       {calcMs && (
                         <div className="flex items-center gap-2 font-mono text-xs">
@@ -329,7 +332,7 @@ export const PortfolioDetailView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* СОСТАВ БУМАГ С ИСПРАВЛЕННОЙ СТРЕЛКОЙ */}
+                  {/* СОСТАВ БУМАГ */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
                     {milestone.assets.map(asset => {
                       const resolved = TickerResolver.resolveTicker(asset.ticker, milestone.date);
@@ -354,7 +357,6 @@ export const PortfolioDetailView: React.FC = () => {
 
                           {calcAsset && (
                             <div className="space-y-0.5 text-[11px] text-slate-500 border-t border-slate-200 dark:border-slate-800 pt-1.5">
-                              {/* ИСПРАВЛЕННАЯ СТРЕЛКА → */}
                               <div className="flex justify-between">
                                 <span>Цены:</span>
                                 <span>{calcAsset.startPrice} → {calcAsset.finishPrice} ₽</span>
@@ -377,7 +379,6 @@ export const PortfolioDetailView: React.FC = () => {
                       );
                     })}
 
-                    {/* Свободный кэш (LQDT) */}
                     {calcMs && calcMs.freeCashWeight > 0 && (
                       <div className="p-3 bg-emerald-500/5 dark:bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-xs space-y-1.5 font-mono">
                         <div className="flex justify-between items-center">
@@ -387,7 +388,6 @@ export const PortfolioDetailView: React.FC = () => {
                           </span>
                         </div>
                         <div className="space-y-0.5 text-[11px] text-slate-500 border-t border-emerald-500/20 pt-1.5">
-                          {/* ИСПРАВЛЕННАЯ СТРЕЛКА → */}
                           <div className="flex justify-between">
                             <span>Цены:</span>
                             <span>{calcMs.lqdtStartPrice} → {calcMs.lqdtFinishPrice} ₽</span>
