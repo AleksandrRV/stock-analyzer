@@ -57,8 +57,9 @@ export interface IPriceHistory {
 export interface IDividendHistory {
   id?: number;
   ticker: string;
-  date: string; // YYYY-MM-DD
-  value: number;
+  date: string; // YYYY-MM-DD (дата отсечки)
+  value: number; // Грязный дивиденд на 1 акцию
+  isManual?: boolean; // Флаг: внесен вручную пользователем
 }
 
 // Структура файла бэкапа JSON

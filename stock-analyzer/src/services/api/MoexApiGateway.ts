@@ -92,7 +92,7 @@ export class MoexApiGateway {
   }
 
   /**
-   * Загружает всю историю дивидендов по тикеру
+   * Загружает историю дивидендов по тикеру (Строго в валюте RUB, без валютных дубликатов ГДР)
    */
   static async fetchDividends(ticker: string): Promise<IDividendHistory[]> {
     try {
@@ -110,24 +110,31 @@ export class MoexApiGateway {
 
       const dateIdx = this.getColumnIndex(dividends.columns, 'registryclosedate');
       const valueIdx = this.getColumnIndex(dividends.columns, 'value');
+      const currencyIdx = this.getColumnIndex(dividends.columns, 'currencyid');
 
-      const results: IDividendHistory[] = [];
+      // Карта дедупликации по дате (сохраняет только рублевую выплату)
+      const resultsMap = new Map<string, IDividendHistory>();
 
       for (const row of dividends.data) {
         const rawDate = String(row[dateIdx]);
         const rawValue = row[valueIdx];
-        const value = typeof rawValue === 'string' ? parseFloat(rawValue.replace(',', '.')) : Number(rawValue);
+        const currency = currencyIdx !== -1 ? String(row[currencyIdx]).toUpperCase() : 'RUB';
 
-        if (rawDate && !isNaN(value)) {
-          results.push({
-            ticker: ticker.toUpperCase(),
-            date: rawDate,
-            value,
-          });
+        // ИГНОРИРУЕМ USD/EUR ГДР-дубликаты! Берем только RUB / SUR / RUR
+        if (currency === 'RUB' || currency === 'SUR' || currency === 'RUR' || currency === '') {
+          const value = typeof rawValue === 'string' ? parseFloat(rawValue.replace(',', '.')) : Number(rawValue);
+
+          if (rawDate && !isNaN(value) && value > 0) {
+            resultsMap.set(rawDate, {
+              ticker: ticker.toUpperCase(),
+              date: rawDate,
+              value,
+            });
+          }
         }
       }
 
-      return results;
+      return Array.from(resultsMap.values());
     } catch (error) {
       console.error(`[MoexApiGateway] Ошибка загрузки дивидендов ${ticker}:`, error);
       return [];

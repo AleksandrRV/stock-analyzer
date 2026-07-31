@@ -210,9 +210,12 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.savePortfolios(updatedPortfolios);
   },
 
-  getVisiblePortfolios: () => {
+getVisiblePortfolios: () => {
     const { portfolios, activeGroupId } = get();
-    return portfolios.filter(p => p.groupId === activeGroupId);
+    return portfolios.filter(p => {
+      const pGroup = (!p.groupId) ? null : p.groupId;
+      return pGroup === activeGroupId;
+    });
   },
 
   getSelectedPortfolio: () => {

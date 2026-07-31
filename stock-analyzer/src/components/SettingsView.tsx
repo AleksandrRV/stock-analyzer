@@ -4,6 +4,7 @@ import { marketDb } from '../db/marketDb';
 import { FilePortabilityService } from '../services/storage/filePortability';
 import { DEFAULT_TICKER_RENAMES } from '../engine/TickerResolver';
 import { IExportData } from '../types/domain';
+import { ManualDividendsModal } from './modals/ManualDividendsModal'; // Импорт модалки
 
 import { 
   Sliders, 
@@ -15,7 +16,8 @@ import {
   Check, 
   AlertCircle, 
   RefreshCw,
-  HardDrive
+  HardDrive,
+  Coins
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -29,11 +31,12 @@ export const SettingsView: React.FC = () => {
     restoreFullData 
   } = usePortfolioStore();
 
-  // Статистика кэша IndexedDB
   const [cacheStats, setCacheStats] = useState({ pricesCount: 0, dividendsCount: 0 });
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  
+  // Модалка ручных дивидендов
+  const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
 
-  // Поля добавления тикера
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [changeDate, setChangeDate] = useState('');
@@ -54,7 +57,6 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // ЭКСПОРТ JSON
   const handleExport = async () => {
     const exportPayload: IExportData = {
       schemaVersion: 1,
@@ -70,7 +72,6 @@ export const SettingsView: React.FC = () => {
     }
   };
 
-  // ИМПОРТ JSON
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -90,10 +91,9 @@ export const SettingsView: React.FC = () => {
       }
     };
     reader.readAsText(file);
-    e.target.value = ''; // Сброс инпута
+    e.target.value = '';
   };
 
-  // Добавление кастомного тикера
   const handleAddRename = (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldTicker || !newTicker || !changeDate) return;
@@ -110,7 +110,6 @@ export const SettingsView: React.FC = () => {
     showToast('success', 'Правило переименования тикера добавлено');
   };
 
-  // Очистка кэша
   const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
     if (!window.confirm('Очистить выбранный рыночный кэш? (Ваши портфели останутся в сохранности)')) return;
 
@@ -139,7 +138,6 @@ export const SettingsView: React.FC = () => {
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       
-      {/* УВЕДОМЛЕНИЕ (TOAST) */}
       {notification && (
         <div className={`p-4 rounded-xl border text-sm font-medium flex items-center gap-2 animate-in fade-in ${
           notification.type === 'success'
@@ -151,7 +149,30 @@ export const SettingsView: React.FC = () => {
         </div>
       )}
 
-      {/* 1. ИМПОРТ И ЭКСПОРТ JSON (PORTABILITY) */}
+      {/* 1. РУЧНОЙ ВВОД ДИВИДЕНДОВ */}
+      <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
+              <Coins className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-lg">Ручной ввод дивидендов</h3>
+              <p className="text-xs text-slate-400">Добавьте дивиденды вручную, если Мосбиржа задерживает их публикацию</p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setIsManualDivsOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-xl shadow-sm transition-all"
+          >
+            <Coins className="w-4 h-4" />
+            <span>Управление дивидендами</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 2. ИМПОРТ И ЭКСПОРТ JSON */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
@@ -164,7 +185,6 @@ export const SettingsView: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-          {/* Кнопка Экспорта */}
           <button
             onClick={handleExport}
             className="flex items-center justify-center gap-2 p-4 bg-sky-500 hover:bg-sky-600 text-white font-medium text-sm rounded-xl shadow-sm transition-all"
@@ -173,7 +193,6 @@ export const SettingsView: React.FC = () => {
             <span>Скачать бэкап (.json)</span>
           </button>
 
-          {/* Кнопка Импорта */}
           <button
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center justify-center gap-2 p-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"
@@ -192,7 +211,7 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 2. ГЛОБАЛЬНЫЕ НАСТРОЙКИ */}
+      {/* 3. ГЛОБАЛЬНЫЕ НАСТРОЙКИ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-6 shadow-sm">
         <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
@@ -204,7 +223,6 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Налог на дивиденды */}
         <div className="space-y-2 max-w-xs">
           <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">
             Ставка налога на дивиденды (%):
@@ -223,7 +241,6 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Менеджер смены тикеров */}
         <div className="space-y-4 pt-2 border-t border-slate-100 dark:border-slate-700/60">
           <div className="flex items-center justify-between">
             <div>
@@ -232,7 +249,6 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
 
-          {/* Форма добавления правила */}
           <form onSubmit={handleAddRename} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
             <input
               type="text"
@@ -266,9 +282,7 @@ export const SettingsView: React.FC = () => {
             </button>
           </form>
 
-          {/* Список правил */}
           <div className="space-y-1.5 max-h-48 overflow-y-auto text-xs font-mono pr-1">
-            {/* Пользовательские правила */}
             {(settings.tickerRenames || []).map(rule => (
               <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 rounded-lg">
                 <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
@@ -278,7 +292,6 @@ export const SettingsView: React.FC = () => {
               </div>
             ))}
 
-            {/* Системные правила по умолчанию */}
             {DEFAULT_TICKER_RENAMES.map(rule => (
               <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500">
                 <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
@@ -289,7 +302,7 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 3. ГРАНУЛЯРНОЕ УПРАВЛЕНИЕ КЭШЕМ INDEXEDDB */}
+      {/* 4. РЫНОЧНЫЙ КЭШ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
@@ -307,11 +320,6 @@ export const SettingsView: React.FC = () => {
           </div>
         </div>
 
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Очистка кэша заставит приложение скачать свежие данные с Мосбиржи при следующем просмотре портфелей. <strong className="text-slate-800 dark:text-slate-200">Составы портфелей не удалятся.</strong>
-        </p>
-
-        {/* 5 Точечных кнопок очистки */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2">
           <button
             onClick={() => handleClearCache('STOCKS')}
@@ -354,6 +362,12 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* МОДАЛКА РУЧНЫХ ДИВИДЕНДОВ */}
+      <ManualDividendsModal
+        isOpen={isManualDivsOpen}
+        onClose={() => setIsManualDivsOpen(false)}
+      />
 
     </div>
   );
