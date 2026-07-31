@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { IPortfolio, IPortfolioGroup, IMilestone, IGlobalSettings, IExportData, ITickerRename } from '../types/domain';
 import { UserStorage, DEFAULT_SETTINGS } from '../services/storage/userStorage';
+import { ICalculatedPortfolio } from '../services/engine/PortfolioCalculationService'; // Импорт типа
 
 const GROUPS_STORAGE_KEY = 'app_user_groups';
 
@@ -11,6 +12,11 @@ interface PortfolioState {
   activeGroupId: string | null;
   selectedPortfolioId: string | null;
   
+  // НОВОЕ: Глобальный кэш готовых математических расчетов
+  calculationsCache: Record<string, ICalculatedPortfolio>;
+  setCalculationCache: (portfolioId: string, calcResult: ICalculatedPortfolio) => void;
+  clearCalculationCache: (portfolioId?: string) => void;
+
   // Загрузка
   loadFromStorage: () => void;
   setSelectedPortfolioId: (id: string | null) => void;
@@ -20,27 +26,22 @@ interface PortfolioState {
   addCustomTickerRename: (rename: ITickerRename) => void;
   removeCustomTickerRename: (oldTicker: string) => void;
 
-  // Полное восстановление (Импорт)
   restoreFullData: (data: IExportData) => void;
   
-  // Действия с портфелями
   createPortfolio: (name: string, groupId?: string | null) => IPortfolio;
   renamePortfolio: (id: string, newName: string) => void;
   deletePortfolio: (id: string) => void;
   movePortfolioToGroup: (portfolioId: string, targetGroupId: string | null) => void;
   closePortfolio: (portfolioId: string, closedAtIso: string | null) => void;
   
-  // Контрольные точки
   addMilestone: (portfolioId: string, milestone: IMilestone) => void;
   updateMilestone: (portfolioId: string, milestone: IMilestone) => void;
   deleteMilestone: (portfolioId: string, milestoneId: string) => void;
   
-  // Группы
   createGroup: (name: string) => void;
   deleteGroup: (groupId: string) => void;
   setActiveGroupId: (groupId: string | null) => void;
 
-  // Селекторы
   getVisiblePortfolios: () => IPortfolio[];
   getSelectedPortfolio: () => IPortfolio | undefined;
 }
@@ -51,6 +52,27 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   activeGroupId: null,
   selectedPortfolioId: null,
+  
+  calculationsCache: {},
+
+  setCalculationCache: (portfolioId, calcResult) => {
+    set(state => ({
+      calculationsCache: { ...state.calculationsCache, [portfolioId]: calcResult }
+    }));
+  },
+
+  // Если передать id - чистится только 1 портфель. Без id - чистятся все (например, при смене налога)
+  clearCalculationCache: (portfolioId) => {
+    if (portfolioId) {
+      set(state => {
+        const newCache = { ...state.calculationsCache };
+        delete newCache[portfolioId];
+        return { calculationsCache: newCache };
+      });
+    } else {
+      set({ calculationsCache: {} });
+    }
+  },
 
   loadFromStorage: () => {
     const portfolios = UserStorage.getPortfolios();
@@ -69,22 +91,21 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     const updated = { ...get().settings, ...newSettings };
     set({ settings: updated });
     UserStorage.saveSettings(updated);
-    // Обновляем список портфелей для триггера пересчета
-    set({ portfolios: [...get().portfolios] });
+    
+    // ПРИ СМЕНЕ НАЛОГА ИЛИ ТИКЕРА: СБРАСЫВАЕМ ВЕСЬ КЭШ РАСЧЕТОВ!
+    get().clearCalculationCache();
   },
 
   addCustomTickerRename: (rename) => {
     const currentRenames = get().settings.tickerRenames || [];
     const filtered = currentRenames.filter(r => r.oldTicker !== rename.oldTicker);
     const updatedRenames = [...filtered, rename];
-    
     get().updateSettings({ tickerRenames: updatedRenames });
   },
 
   removeCustomTickerRename: (oldTicker) => {
     const currentRenames = get().settings.tickerRenames || [];
     const updatedRenames = currentRenames.filter(r => r.oldTicker !== oldTicker);
-    
     get().updateSettings({ tickerRenames: updatedRenames });
   },
 
@@ -96,10 +117,10 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       selectedPortfolioId: null,
       activeGroupId: null,
     });
-
     UserStorage.saveSettings(data.settings || DEFAULT_SETTINGS);
     UserStorage.savePortfolios(data.portfolios || []);
     localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(data.groups || []));
+    get().clearCalculationCache(); // Сброс кэша после импорта
   },
 
   createPortfolio: (name, groupId = null) => {
@@ -111,7 +132,6 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       closedAt: null,
       milestones: [],
     };
-
     const updated = [newPortfolio, ...get().portfolios];
     set({ portfolios: updated });
     UserStorage.savePortfolios(updated);
@@ -130,6 +150,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     const updated = get().portfolios.filter(p => p.id !== id);
     set({ portfolios: updated, selectedPortfolioId: get().selectedPortfolioId === id ? null : get().selectedPortfolioId });
     UserStorage.savePortfolios(updated);
+    get().clearCalculationCache(id);
   },
 
   movePortfolioToGroup: (portfolioId, targetGroupId) => {
@@ -146,6 +167,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     );
     set({ portfolios: updated });
     UserStorage.savePortfolios(updated);
+    get().clearCalculationCache(portfolioId); // Сброс кэша при изменении даты закрытия
   },
 
   addMilestone: (portfolioId, milestone) => {
@@ -156,9 +178,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       );
       return { ...p, milestones: newMilestones };
     });
-
     set({ portfolios: updated });
     UserStorage.savePortfolios(updated);
+    get().clearCalculationCache(portfolioId); // Сброс кэша конкретного портфеля при добавлении точки
   },
 
   updateMilestone: (portfolioId, updatedMilestone) => {
@@ -169,9 +191,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       return { ...p, milestones: newMilestones };
     });
-
     set({ portfolios: updated });
     UserStorage.savePortfolios(updated);
+    get().clearCalculationCache(portfolioId);
   },
 
   deleteMilestone: (portfolioId, milestoneId) => {
@@ -179,9 +201,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       if (p.id !== portfolioId) return p;
       return { ...p, milestones: p.milestones.filter(m => m.id !== milestoneId) };
     });
-
     set({ portfolios: updated });
     UserStorage.savePortfolios(updated);
+    get().clearCalculationCache(portfolioId);
   },
 
   createGroup: (name) => {
@@ -210,10 +232,10 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.savePortfolios(updatedPortfolios);
   },
 
-getVisiblePortfolios: () => {
+  getVisiblePortfolios: () => {
     const { portfolios, activeGroupId } = get();
     return portfolios.filter(p => {
-      const pGroup = (!p.groupId) ? null : p.groupId;
+      const pGroup = (!p.groupId || p.groupId === 'NO GROUP' || p.groupId === 'NO_GROUP') ? null : p.groupId;
       return pGroup === activeGroupId;
     });
   },

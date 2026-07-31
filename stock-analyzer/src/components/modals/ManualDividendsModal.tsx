@@ -11,7 +11,7 @@ interface Props {
 }
 
 export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  const { portfolios, loadFromStorage } = usePortfolioStore();
+  const { portfolios, loadFromStorage, clearCalculationCache } = usePortfolioStore();
 
   const [manualList, setManualList] = useState<IDividendHistory[]>([]);
   const [ticker, setTicker] = useState('');
@@ -83,6 +83,8 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     setValue('');
     setEditingId(null);
     await loadManualList();
+        clearCalculationCache(); // Сброс кэша расчетов!
+        loadFromStorage();
     
     // Триггерим пересчет всех открытых портфелей
     loadFromStorage();
@@ -101,6 +103,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     if (window.confirm('Удалить эту ручную запись дивиденда?')) {
       await marketDb.dividends.delete(id);
       await loadManualList();
+      clearCalculationCache(); // Сброс кэша расчетов!
       loadFromStorage();
     }
   };

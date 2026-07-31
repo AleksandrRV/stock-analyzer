@@ -1,103 +1,106 @@
 import Dexie, { Table } from 'dexie';
 import { IPriceHistory, IDividendHistory } from '../types/domain';
 
+interface ICacheMeta {
+  key: string; // Например "DIV_SBER" или "PRICE_SBER_2024-01-01"
+  lastUpdatedMs: number;
+}
+
 export class MarketDatabase extends Dexie {
-  prices!: Table<IPriceHistory>;
-  dividends!: Table<IDividendHistory>;
+  prices!: Table<IPriceHistory, [string, string]>; // PK = [ticker, date]
+  dividends!: Table<IDividendHistory, [string, string]>; // PK = [ticker, date]
+  meta!: Table<ICacheMeta, string>;
 
   constructor() {
     super('MarketCacheDB');
 
-    this.version(1).stores({
-      prices: '++id, [ticker+date], ticker, date',
-      dividends: '++id, [ticker+date], ticker, date, isManual',
+    // Версия 2: Переход на составные первичные ключи для абсолютной дедупликации!
+    this.version(2).stores({
+      prices: '[ticker+date], ticker, date',
+      dividends: '[ticker+date], ticker, date, isManual',
+      meta: 'key',
     });
   }
 
-  // Проверка: есть ли уже дивиденд по тикеру в интервале +-30 дней от даты
+  // Проверка актуальности кэша (TTL)
+  async isCacheValid(key: string, ttlMs: number): Promise<boolean> {
+    const record = await this.meta.get(key);
+    if (!record) return false;
+    return (Date.now() - record.lastUpdatedMs) < ttlMs;
+  }
+
+  async setCacheUpdated(key: string) {
+    await this.meta.put({ key, lastUpdatedMs: Date.now() });
+  }
+
+  // Дивиденды +- 30 дней
   async hasDividendInWindow(ticker: string, dateStr: string, windowDays = 30): Promise<boolean> {
     const cleanTicker = ticker.trim().toUpperCase();
     const targetTime = new Date(dateStr).getTime();
     const windowMs = windowDays * 24 * 60 * 60 * 1000;
 
     const existing = await this.dividends.where('ticker').equals(cleanTicker).toArray();
-
-    return existing.some(div => {
-      const divTime = new Date(div.date).getTime();
-      return Math.abs(divTime - targetTime) <= windowMs;
-    });
+    return existing.some(div => Math.abs(new Date(div.date).getTime() - targetTime) <= windowMs);
   }
 
-  // Сверка и автоматическая очистка ручных дивидендов при подгрузке с MOEX
+  // Сверка и автоматическая очистка ручных дивидендов
   async reconcileAndSaveMoexDividends(ticker: string, moexDividends: IDividendHistory[]) {
     const cleanTicker = ticker.trim().toUpperCase();
     const windowMs = 30 * 24 * 60 * 60 * 1000;
 
-    // Находим все текущие ручные дивиденды по этой бумаге
     const existingManuals = await this.dividends
       .where('ticker')
       .equals(cleanTicker)
       .filter(d => !!d.isManual)
       .toArray();
 
-    // Если нашли совпадение по дате +-30 дней с официальными — удаляем ручные
-    const manualIdsToDelete: number[] = [];
+    // Находим ключи ручных записей для удаления
+    const manualKeysToDelete: [string, string][] = [];
 
     for (const manual of existingManuals) {
       const manualTime = new Date(manual.date).getTime();
-      const hasOfficialMatch = moexDividends.some(moexDiv => {
-        const moexTime = new Date(moexDiv.date).getTime();
-        return Math.abs(moexTime - manualTime) <= windowMs;
-      });
-
-      if (hasOfficialMatch && manual.id) {
-        manualIdsToDelete.push(manual.id);
+      const hasMatch = moexDividends.some(moexDiv => Math.abs(new Date(moexDiv.date).getTime() - manualTime) <= windowMs);
+      
+      if (hasMatch) {
+        manualKeysToDelete.push([manual.ticker, manual.date]);
       }
     }
 
-    if (manualIdsToDelete.length > 0) {
-      await this.dividends.bulkDelete(manualIdsToDelete);
+    if (manualKeysToDelete.length > 0) {
+      await this.dividends.bulkDelete(manualKeysToDelete);
     }
 
-    // Сохраняем официальные с MOEX
     if (moexDividends.length > 0) {
+      // Идеальное сохранение: bulkPut на составной ключ строго ПЕРЕЗАПИСЫВАЕТ данные
       await this.dividends.bulkPut(moexDividends);
     }
   }
 
-  // Получить все ручные дивиденды
   async getAllManualDividends(): Promise<IDividendHistory[]> {
     return await this.dividends.filter(d => !!d.isManual).toArray();
   }
 
-  // Очистки
   async clearStockPricesOnly() {
-    await this.prices
-      .filter(p => p.ticker !== 'MCFTR' && p.ticker !== 'LQDT')
-      .delete();
+    await this.prices.filter(p => p.ticker !== 'MCFTR' && p.ticker !== 'LQDT').delete();
+    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !m.key.includes('LQDT')).delete();
   }
-
   async clearFundPricesOnly() {
     await this.prices.where('ticker').equals('LQDT').delete();
   }
-
   async clearIndicesOnly() {
     await this.prices.where('ticker').equals('MCFTR').delete();
   }
-
   async clearDividendsOnly() {
     await this.dividends.clear();
+    await this.meta.filter(m => m.key.startsWith('DIV_')).delete();
   }
-
   async clearAllCache() {
     await this.prices.clear();
     await this.dividends.clear();
+    await this.meta.clear();
   }
-
   async getCacheStats() {
-    const pricesCount = await this.prices.count();
-    const dividendsCount = await this.dividends.count();
-    return { pricesCount, dividendsCount };
+    return { pricesCount: await this.prices.count(), dividendsCount: await this.dividends.count() };
   }
 }
 

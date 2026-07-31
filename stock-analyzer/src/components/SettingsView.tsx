@@ -233,9 +233,27 @@ export const SettingsView: React.FC = () => {
               step="1"
               min="0"
               max="100"
-              value={settings.dividendTaxRate}
-              onChange={e => updateSettings({ dividendTaxRate: parseFloat(e.target.value) || 0 })}
-              className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono font-bold w-28"
+              value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate}
+              onChange={e => {
+                const val = e.target.value;
+                // Если пользователь стер значение, сохраняем 0
+                if (val === '') {
+                  updateSettings({ dividendTaxRate: 0 });
+                } else {
+                  const parsed = parseFloat(val);
+                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
+                    updateSettings({ dividendTaxRate: parsed });
+                  }
+                }
+              }}
+              onBlur={e => {
+                // Страховка: если при потере фокуса поле пустое или NaN, ставим 0
+                const parsed = parseFloat(e.target.value);
+                if (isNaN(parsed)) {
+                  updateSettings({ dividendTaxRate: 0 });
+                }
+              }}
+              className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono font-bold w-28 focus:ring-2 focus:ring-sky-500 focus:outline-none"
             />
             <span className="text-xs text-slate-400">% (по умолчанию 15%)</span>
           </div>

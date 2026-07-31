@@ -231,7 +231,8 @@ export class PortfolioCalculationService {
   }
 
   static async calculatePortfolio(portfolio: IPortfolio): Promise<ICalculatedPortfolio> {
-    const taxRate = UserStorage.getSettings().dividendTaxRate || 15;
+    const savedTax = UserStorage.getSettings().dividendTaxRate;
+    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
 
     if (!portfolio.milestones || portfolio.milestones.length === 0) {
       return this.getEmptyResult(portfolio.id);
