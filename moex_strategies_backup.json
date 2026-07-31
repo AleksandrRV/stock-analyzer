@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "exportedAt": "2026-07-31T16:01:08.764Z",
+  "settings": {
+    "dividendTaxRate": 15,
+    "tickerRenames": []
+  },
+  "groups": [
+    {
+      "id": "group_1785478149462",
+      "name": "123"
+    }
+  ],
+  "portfolios": [
+    {
+      "id": "port_1785477908654_1sssl",
+      "groupId": null,
+      "name": "Дивидендный рост База",
+      "createdAt": "2026-07-31T06:05:08.654Z",
+      "closedAt": null,
+      "milestones": [
+        {
+          "id": "mst_1785487078770_gbj",
+          "date": "2026-07-25T07:00:00.000Z",
+          "assets": [
+            {
+              "ticker": "SBER",
+              "weight": 40,
+              "type": "STOCK"
+            },
+            {
+              "ticker": "LKOH",
+              "weight": 30,
+              "type": "STOCK"
+            }
+          ]
+        },
+        {
+          "id": "mst_1785487203193_l4r",
+          "date": "2026-07-26T13:00:00.000Z",
+          "assets": [
+            {
+              "ticker": "SBER",
+              "weight": 33,
+              "type": "STOCK"
+            },
+            {
+              "ticker": "LKOH",
+              "weight": 33,
+              "type": "STOCK"
+            },
+            {
+              "ticker": "YDEX",
+              "weight": 33,
+              "type": "STOCK"
+            }
+          ]
+        },
+        {
+          "id": "mst_1785487947473_iz8",
+          "date": "2026-07-28T08:00:00.000Z",
+          "assets": [
+            {
+              "ticker": "SBER",
+              "weight": 33.33,
+              "type": "STOCK"
+            },
+            {
+              "ticker": "LKOH",
+              "weight": 33.33,
+              "type": "STOCK"
+            },
+            {
+              "ticker": "YDEX",
+              "weight": 33.33,
+              "type": "STOCK"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "port_1785477798335_di4u3",
+      "groupId": null,
+      "name": "Дивидендный рост 2024",
+      "createdAt": "2026-07-31T06:03:18.335Z",
+      "closedAt": null,
+      "milestones": [
+        {
+          "id": "mst_1785503429523_7v4",
+          "date": "2025-01-01T13:00:00.000Z",
+          "assets": [
+            {
+              "ticker": "SBER",
+              "weight": 50,
+              "type": "STOCK"
+            }
+          ]
+        },
+        {
+          "id": "mst_1785502759787_d04",
+          "date": "2026-01-01T13:00:00.000Z",
+          "assets": []
+        }
+      ]
+    }
+  ]
+}

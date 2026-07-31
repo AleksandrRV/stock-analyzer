@@ -60,3 +60,12 @@ export interface IDividendHistory {
   date: string; // YYYY-MM-DD
   value: number;
 }
+
+// Структура файла бэкапа JSON
+export interface IExportData {
+  schemaVersion: number; // Версия схемы (1)
+  exportedAt: string;    // ISO дата экспортного файла
+  settings: IGlobalSettings;
+  groups: IPortfolioGroup[];
+  portfolios: IPortfolio[];
+}

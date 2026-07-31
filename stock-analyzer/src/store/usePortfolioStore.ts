@@ -1,32 +1,41 @@
 import { create } from 'zustand';
-import { IPortfolio, IPortfolioGroup, IMilestone } from '../types/domain';
-import { UserStorage } from '../services/storage/userStorage';
+import { IPortfolio, IPortfolioGroup, IMilestone, IGlobalSettings, IExportData, ITickerRename } from '../types/domain';
+import { UserStorage, DEFAULT_SETTINGS } from '../services/storage/userStorage';
 
 const GROUPS_STORAGE_KEY = 'app_user_groups';
 
 interface PortfolioState {
   portfolios: IPortfolio[];
   groups: IPortfolioGroup[];
+  settings: IGlobalSettings;
   activeGroupId: string | null;
-  selectedPortfolioId: string | null; // НОВОЕ: ID открытого портфеля
+  selectedPortfolioId: string | null;
   
   // Загрузка
   loadFromStorage: () => void;
   setSelectedPortfolioId: (id: string | null) => void;
+  
+  // Настройки
+  updateSettings: (newSettings: Partial<IGlobalSettings>) => void;
+  addCustomTickerRename: (rename: ITickerRename) => void;
+  removeCustomTickerRename: (oldTicker: string) => void;
+
+  // Полное восстановление (Импорт)
+  restoreFullData: (data: IExportData) => void;
   
   // Действия с портфелями
   createPortfolio: (name: string, groupId?: string | null) => IPortfolio;
   renamePortfolio: (id: string, newName: string) => void;
   deletePortfolio: (id: string) => void;
   movePortfolioToGroup: (portfolioId: string, targetGroupId: string | null) => void;
-  closePortfolio: (portfolioId: string, closedAtIso: string | null) => void; // НОВОЕ
+  closePortfolio: (portfolioId: string, closedAtIso: string | null) => void;
   
-  // Действия с контрольными точками (Milestones)
+  // Контрольные точки
   addMilestone: (portfolioId: string, milestone: IMilestone) => void;
   updateMilestone: (portfolioId: string, milestone: IMilestone) => void;
   deleteMilestone: (portfolioId: string, milestoneId: string) => void;
   
-  // Действия с группами
+  // Группы
   createGroup: (name: string) => void;
   deleteGroup: (groupId: string) => void;
   setActiveGroupId: (groupId: string | null) => void;
@@ -39,20 +48,59 @@ interface PortfolioState {
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   portfolios: [],
   groups: [],
+  settings: DEFAULT_SETTINGS,
   activeGroupId: null,
   selectedPortfolioId: null,
 
   loadFromStorage: () => {
     const portfolios = UserStorage.getPortfolios();
+    const settings = UserStorage.getSettings();
     const savedGroups = localStorage.getItem(GROUPS_STORAGE_KEY);
     const groups: IPortfolioGroup[] = savedGroups ? JSON.parse(savedGroups) : [];
     
-    set({ portfolios, groups });
+    set({ portfolios, groups, settings });
   },
 
   setSelectedPortfolioId: (id) => set({ selectedPortfolioId: id }),
 
   setActiveGroupId: (groupId) => set({ activeGroupId: groupId }),
+
+  updateSettings: (newSettings) => {
+    const updated = { ...get().settings, ...newSettings };
+    set({ settings: updated });
+    UserStorage.saveSettings(updated);
+    // Обновляем список портфелей для триггера пересчета
+    set({ portfolios: [...get().portfolios] });
+  },
+
+  addCustomTickerRename: (rename) => {
+    const currentRenames = get().settings.tickerRenames || [];
+    const filtered = currentRenames.filter(r => r.oldTicker !== rename.oldTicker);
+    const updatedRenames = [...filtered, rename];
+    
+    get().updateSettings({ tickerRenames: updatedRenames });
+  },
+
+  removeCustomTickerRename: (oldTicker) => {
+    const currentRenames = get().settings.tickerRenames || [];
+    const updatedRenames = currentRenames.filter(r => r.oldTicker !== oldTicker);
+    
+    get().updateSettings({ tickerRenames: updatedRenames });
+  },
+
+  restoreFullData: (data) => {
+    set({
+      settings: data.settings || DEFAULT_SETTINGS,
+      groups: data.groups || [],
+      portfolios: data.portfolios || [],
+      selectedPortfolioId: null,
+      activeGroupId: null,
+    });
+
+    UserStorage.saveSettings(data.settings || DEFAULT_SETTINGS);
+    UserStorage.savePortfolios(data.portfolios || []);
+    localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(data.groups || []));
+  },
 
   createPortfolio: (name, groupId = null) => {
     const newPortfolio: IPortfolio = {
@@ -100,16 +148,12 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.savePortfolios(updated);
   },
 
-  // УПРАВЛЕНИЕ КОНТРОЛЬНЫМИ ТОЧКАМИ
   addMilestone: (portfolioId, milestone) => {
     const updated = get().portfolios.map(p => {
       if (p.id !== portfolioId) return p;
-      
-      // Добавляем и сортируем по дате по возрастанию
       const newMilestones = [...p.milestones, milestone].sort(
         (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
       );
-      
       return { ...p, milestones: newMilestones };
     });
 
@@ -120,11 +164,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   updateMilestone: (portfolioId, updatedMilestone) => {
     const updated = get().portfolios.map(p => {
       if (p.id !== portfolioId) return p;
-      
       const newMilestones = p.milestones
         .map(m => (m.id === updatedMilestone.id ? updatedMilestone : m))
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      
       return { ...p, milestones: newMilestones };
     });
 
