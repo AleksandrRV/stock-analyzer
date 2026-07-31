@@ -1,4 +1,4 @@
-cd -Path "E:\MyProjects\InvestHelperWeb\stock-analyzer"
+cd -Path "E:\MyProjects\stock-analyzer\stock-analyzer"
 
 Set-ExecutionPolicy RemoteSigned -Scope Process
 

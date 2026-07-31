@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { IPortfolio, IPortfolioGroup } from '../types/domain';
+import { IPortfolio, IPortfolioGroup, IMilestone } from '../types/domain';
 import { UserStorage } from '../services/storage/userStorage';
 
 const GROUPS_STORAGE_KEY = 'app_user_groups';
@@ -7,31 +7,40 @@ const GROUPS_STORAGE_KEY = 'app_user_groups';
 interface PortfolioState {
   portfolios: IPortfolio[];
   groups: IPortfolioGroup[];
-  activeGroupId: string | null; // null = Базовая группа, 'ARCHIVE' = Архив, string = ID группы
+  activeGroupId: string | null;
+  selectedPortfolioId: string | null; // НОВОЕ: ID открытого портфеля
   
   // Загрузка
   loadFromStorage: () => void;
+  setSelectedPortfolioId: (id: string | null) => void;
   
   // Действия с портфелями
   createPortfolio: (name: string, groupId?: string | null) => IPortfolio;
   renamePortfolio: (id: string, newName: string) => void;
   deletePortfolio: (id: string) => void;
   movePortfolioToGroup: (portfolioId: string, targetGroupId: string | null) => void;
-  archivePortfolio: (portfolioId: string) => void;
+  closePortfolio: (portfolioId: string, closedAtIso: string | null) => void; // НОВОЕ
+  
+  // Действия с контрольными точками (Milestones)
+  addMilestone: (portfolioId: string, milestone: IMilestone) => void;
+  updateMilestone: (portfolioId: string, milestone: IMilestone) => void;
+  deleteMilestone: (portfolioId: string, milestoneId: string) => void;
   
   // Действия с группами
   createGroup: (name: string) => void;
   deleteGroup: (groupId: string) => void;
   setActiveGroupId: (groupId: string | null) => void;
 
-  // Селекторы (Lazy Loading)
+  // Селекторы
   getVisiblePortfolios: () => IPortfolio[];
+  getSelectedPortfolio: () => IPortfolio | undefined;
 }
 
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   portfolios: [],
   groups: [],
-  activeGroupId: null, // По умолчанию "Базовая группа"
+  activeGroupId: null,
+  selectedPortfolioId: null,
 
   loadFromStorage: () => {
     const portfolios = UserStorage.getPortfolios();
@@ -41,9 +50,9 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     set({ portfolios, groups });
   },
 
-  setActiveGroupId: (groupId) => {
-    set({ activeGroupId: groupId });
-  },
+  setSelectedPortfolioId: (id) => set({ selectedPortfolioId: id }),
+
+  setActiveGroupId: (groupId) => set({ activeGroupId: groupId }),
 
   createPortfolio: (name, groupId = null) => {
     const newPortfolio: IPortfolio = {
@@ -71,7 +80,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
   deletePortfolio: (id) => {
     const updated = get().portfolios.filter(p => p.id !== id);
-    set({ portfolios: updated });
+    set({ portfolios: updated, selectedPortfolioId: get().selectedPortfolioId === id ? null : get().selectedPortfolioId });
     UserStorage.savePortfolios(updated);
   },
 
@@ -83,8 +92,54 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.savePortfolios(updated);
   },
 
-  archivePortfolio: (portfolioId) => {
-    get().movePortfolioToGroup(portfolioId, 'ARCHIVE');
+  closePortfolio: (portfolioId, closedAtIso) => {
+    const updated = get().portfolios.map(p => 
+      p.id === portfolioId ? { ...p, closedAt: closedAtIso } : p
+    );
+    set({ portfolios: updated });
+    UserStorage.savePortfolios(updated);
+  },
+
+  // УПРАВЛЕНИЕ КОНТРОЛЬНЫМИ ТОЧКАМИ
+  addMilestone: (portfolioId, milestone) => {
+    const updated = get().portfolios.map(p => {
+      if (p.id !== portfolioId) return p;
+      
+      // Добавляем и сортируем по дате по возрастанию
+      const newMilestones = [...p.milestones, milestone].sort(
+        (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+      );
+      
+      return { ...p, milestones: newMilestones };
+    });
+
+    set({ portfolios: updated });
+    UserStorage.savePortfolios(updated);
+  },
+
+  updateMilestone: (portfolioId, updatedMilestone) => {
+    const updated = get().portfolios.map(p => {
+      if (p.id !== portfolioId) return p;
+      
+      const newMilestones = p.milestones
+        .map(m => (m.id === updatedMilestone.id ? updatedMilestone : m))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      return { ...p, milestones: newMilestones };
+    });
+
+    set({ portfolios: updated });
+    UserStorage.savePortfolios(updated);
+  },
+
+  deleteMilestone: (portfolioId, milestoneId) => {
+    const updated = get().portfolios.map(p => {
+      if (p.id !== portfolioId) return p;
+      return { ...p, milestones: p.milestones.filter(m => m.id !== milestoneId) };
+    });
+
+    set({ portfolios: updated });
+    UserStorage.savePortfolios(updated);
   },
 
   createGroup: (name) => {
@@ -98,7 +153,6 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   },
 
   deleteGroup: (groupId) => {
-    // При удалении группы портфели переносятся в Базовую группу (null)
     const updatedPortfolios = get().portfolios.map(p => 
       p.groupId === groupId ? { ...p, groupId: null } : p
     );
@@ -114,10 +168,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.savePortfolios(updatedPortfolios);
   },
 
-  // ГЛАВНЫЙ МЕХАНИЗМ ЛЕНИВОЙ ЗАГРУЗКИ
-  // Возвращает ТОЛЬКО портфели активной группы
   getVisiblePortfolios: () => {
     const { portfolios, activeGroupId } = get();
     return portfolios.filter(p => p.groupId === activeGroupId);
+  },
+
+  getSelectedPortfolio: () => {
+    const { portfolios, selectedPortfolioId } = get();
+    return portfolios.find(p => p.id === selectedPortfolioId);
   },
 }));

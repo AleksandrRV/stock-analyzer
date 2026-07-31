@@ -19,7 +19,8 @@ import {
   Trash2, 
   ChevronDown, 
   ChevronUp,
-  Briefcase
+  Briefcase,
+  ChevronRight
 } from 'lucide-react';
 
 export const DashboardView: React.FC = () => {
@@ -28,6 +29,7 @@ export const DashboardView: React.FC = () => {
     activeGroupId,
     loadFromStorage,
     setActiveGroupId,
+    setSelectedPortfolioId, // НОВОЕ: Открытие портфеля
     createPortfolio,
     renamePortfolio,
     deletePortfolio,
@@ -37,31 +39,26 @@ export const DashboardView: React.FC = () => {
     getVisiblePortfolios,
   } = usePortfolioStore();
 
-  // Модальные окна
   const [isCreatePortModalOpen, setIsCreatePortModalOpen] = useState(false);
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false);
   const [editingPortfolio, setEditingPortfolio] = useState<IPortfolio | null>(null);
   const [deletingPortfolio, setDeletingPortfolio] = useState<IPortfolio | null>(null);
-  const [deletingGroup, setDeletingGroup] = useState<IPortfolioGroup | null>(null); // НОВОЕ: состояние удаления папки
+  const [deletingGroup, setDeletingGroup] = useState<IPortfolioGroup | null>(null);
   const [movingPortfolio, setMovingPortfolio] = useState<IPortfolio | null>(null);
 
-  // Свернуть/развернуть песочницу
   const [showDebug, setShowDebug] = useState(false);
-
-  // Активное меню карточки
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
 
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
 
-  // Портфели, видимые на текущем табе (Lazy Loading Filter)
   const visiblePortfolios = getVisiblePortfolios();
 
   return (
     <div className="space-y-6">
       
-      {/* ВЕРХНЯЯ ПАНЕЛЬ: Заголовок и Действия */}
+      {/* ВЕРХНЯЯ ПАНЕЛЬ */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Ваши портфели</h2>
@@ -89,9 +86,8 @@ export const DashboardView: React.FC = () => {
         </div>
       </div>
 
-      {/* ТАБЫ ГРУПП (Папок) */}
+      {/* ТАБЫ ГРУПП */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-2 scrollbar-none">
-        {/* Базовая группа */}
         <button
           onClick={() => setActiveGroupId(null)}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
@@ -104,7 +100,6 @@ export const DashboardView: React.FC = () => {
           <span>Базовая группа</span>
         </button>
 
-        {/* Пользовательские группы */}
         {groups.map(group => (
           <div key={group.id} className="flex items-center group">
             <button
@@ -120,7 +115,7 @@ export const DashboardView: React.FC = () => {
             </button>
             {activeGroupId === group.id && (
               <button
-                onClick={() => setDeletingGroup(group)} // Вызов диалога подтверждения
+                onClick={() => setDeletingGroup(group)}
                 title="Удалить папку"
                 className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
               >
@@ -130,7 +125,6 @@ export const DashboardView: React.FC = () => {
           </div>
         ))}
 
-        {/* Архив */}
         <button
           onClick={() => setActiveGroupId('ARCHIVE')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
@@ -150,17 +144,20 @@ export const DashboardView: React.FC = () => {
           {visiblePortfolios.map(portfolio => (
             <div
               key={portfolio.id}
-              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition-all relative group"
+              onClick={() => setSelectedPortfolioId(portfolio.id)} // Клик открывает детальный вид
+              className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition-all relative group cursor-pointer"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h3 className="font-bold text-lg leading-snug">{portfolio.name}</h3>
+                  <h3 className="font-bold text-lg leading-snug group-hover:text-sky-500 transition-colors">
+                    {portfolio.name}
+                  </h3>
                   <span className="text-xs text-slate-400 font-mono">
                     Создан: {DateTimeStandardizer.formatToLocalDisplay(portfolio.createdAt).split(' ')[0]}
                   </span>
                 </div>
 
-                <div className="relative">
+                <div className="relative" onClick={e => e.stopPropagation()}>
                   <button
                     onClick={() => setActiveMenuId(activeMenuId === portfolio.id ? null : portfolio.id)}
                     className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
@@ -208,8 +205,11 @@ export const DashboardView: React.FC = () => {
               </div>
 
               <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">Точек: {portfolio.milestones.length}</span>
-                <span className="text-sky-500 font-semibold">Готов к точке (Этап 5)</span>
+                <span className="text-slate-400">Точек среза: {portfolio.milestones.length}</span>
+                <span className="text-sky-500 font-semibold flex items-center gap-1">
+                  <span>Открыть</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </span>
               </div>
             </div>
           ))}
@@ -229,7 +229,7 @@ export const DashboardView: React.FC = () => {
         </div>
       )}
 
-      {/* СКЛАД: Сворачиваемая песочница для тестов */}
+      {/* СКЛАД */}
       <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
         <button
           onClick={() => setShowDebug(!showDebug)}
@@ -278,7 +278,6 @@ export const DashboardView: React.FC = () => {
         onClose={() => setDeletingPortfolio(null)}
       />
 
-      {/* ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ ПАПКИ */}
       <ConfirmDeleteModal
         isOpen={!!deletingGroup}
         portfolioName={`папку "${deletingGroup?.name}" (портфели вернутся в Базовую группу)`}
