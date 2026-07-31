@@ -11,14 +11,14 @@ interface Props {
 }
 
 export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  const { portfolios, loadFromStorage, clearCalculationCache } = usePortfolioStore();
+  const { loadFromStorage, clearCalculationCache } = usePortfolioStore();
 
   const [manualList, setManualList] = useState<IDividendHistory[]>([]);
   const [ticker, setTicker] = useState('');
   const [date, setDate] = useState('');
   const [value, setValue] = useState('');
   
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingKey, setEditingKey] = useState<[string, string] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -50,8 +50,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
       return;
     }
 
-    // Если это новое добавление — проверяем окно +-1 месяц (30 дней)
-    if (!editingId) {
+    if (!editingKey) {
       const isBlocked = await marketDb.hasDividendInWindow(cleanTicker, date, 30);
       if (isBlocked) {
         setErrorMessage(`Запрещено: по акции ${cleanTicker} уже есть дивиденд за период ${date} (±30 дней)`);
@@ -59,51 +58,42 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
       }
     }
 
-    if (editingId) {
-      // Редактирование
-      await marketDb.dividends.update(editingId, {
-        ticker: cleanTicker,
-        date,
-        value: numValue,
-      });
+    await marketDb.dividends.put({
+      ticker: cleanTicker,
+      date,
+      value: numValue,
+      isManual: true,
+    });
+
+    if (editingKey) {
       setSuccessMessage('Запись дивиденда успешно изменена');
     } else {
-      // Добавление нового
-      await marketDb.dividends.put({
-        ticker: cleanTicker,
-        date,
-        value: numValue,
-        isManual: true,
-      });
       setSuccessMessage('Ручной дивиденд успешно добавлен');
     }
 
     setTicker('');
     setDate('');
     setValue('');
-    setEditingId(null);
+    setEditingKey(null);
     await loadManualList();
-        clearCalculationCache(); // Сброс кэша расчетов!
-        loadFromStorage();
     
-    // Триггерим пересчет всех открытых портфелей
+    clearCalculationCache();
     loadFromStorage();
   };
 
   const handleEdit = (div: IDividendHistory) => {
-    setEditingId(div.id || null);
+    setEditingKey([div.ticker, div.date]);
     setTicker(div.ticker);
     setDate(div.date);
     setValue(String(div.value));
     setErrorMessage(null);
   };
 
-  const handleDelete = async (id?: number) => {
-    if (!id) return;
-    if (window.confirm('Удалить эту ручную запись дивиденда?')) {
-      await marketDb.dividends.delete(id);
+  const handleDelete = async (tickerToDelete: string, dateToDelete: string) => {
+    if (window.confirm(`Удалить ручную запись дивиденда по ${tickerToDelete} за ${dateToDelete}?`)) {
+      await marketDb.dividends.delete([tickerToDelete, dateToDelete]);
       await loadManualList();
-      clearCalculationCache(); // Сброс кэша расчетов!
+      clearCalculationCache();
       loadFromStorage();
     }
   };
@@ -112,7 +102,6 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-xl max-h-[90vh] flex flex-col">
         
-        {/* ШАПКА */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
@@ -128,7 +117,6 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* СООБЩЕНИЯ ОШИБОК / УСПЕХА */}
         {errorMessage && (
           <div className="p-3 bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-xl text-xs font-medium flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -143,7 +131,6 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {/* ФОРМА ВВОДА */}
         <form onSubmit={handleAddOrUpdate} className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>
@@ -151,10 +138,11 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <input
                 type="text"
                 required
+                disabled={!!editingKey}
                 value={ticker}
                 onChange={e => setTicker(e.target.value.toUpperCase())}
                 placeholder="SBER"
-                className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
+                className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase disabled:opacity-50"
               />
             </div>
             <div>
@@ -162,9 +150,10 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
               <input
                 type="date"
                 required
+                disabled={!!editingKey}
                 value={date}
                 onChange={e => setDate(e.target.value)}
-                className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
+                className="w-full p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono disabled:opacity-50"
               />
             </div>
             <div>
@@ -182,15 +171,15 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
             </div>
           </div>
 
-          {/* Быстрый выбор тикера */}
           <div className="flex items-center gap-1.5 flex-wrap pt-1">
             <span className="text-[11px] text-slate-400">Быстро:</span>
             {POPULAR_MOEX_ASSETS.filter(a => a.type === 'STOCK').slice(0, 6).map(pop => (
               <button
                 key={pop.ticker}
                 type="button"
+                disabled={!!editingKey}
                 onClick={() => setTicker(pop.ticker)}
-                className="px-2 py-0.5 bg-white dark:bg-slate-800 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 hover:text-amber-500"
+                className="px-2 py-0.5 bg-white dark:bg-slate-800 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 hover:text-amber-500 disabled:opacity-50"
               >
                 {pop.ticker}
               </button>
@@ -198,11 +187,11 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
-            {editingId && (
+            {editingKey && (
               <button
                 type="button"
                 onClick={() => {
-                  setEditingId(null);
+                  setEditingKey(null);
                   setTicker('');
                   setDate('');
                   setValue('');
@@ -217,12 +206,11 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
               className="px-4 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-semibold rounded-lg shadow-sm flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>{editingId ? 'Сохранить изменения' : 'Добавить дивиденд'}</span>
+              <span>{editingKey ? 'Сохранить изменения' : 'Добавить дивиденд'}</span>
             </button>
           </div>
         </form>
 
-        {/* СПИСОК ВНЕСЕННЫХ ВРУЧНУЮ ДИВИДЕНДОВ */}
         <div className="space-y-2 flex-1 overflow-y-auto pr-1">
           <h4 className="font-semibold text-xs text-slate-500">Внесенные вручную записи ({manualList.length}):</h4>
 
@@ -233,7 +221,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           ) : (
             <div className="space-y-1.5 font-mono text-xs">
               {manualList.map(div => (
-                <div key={div.id} className="p-3 bg-slate-50 dark:bg-slate-900/60 border rounded-xl flex items-center justify-between">
+                <div key={`${div.ticker}_${div.date}`} className="p-3 bg-slate-50 dark:bg-slate-900/60 border rounded-xl flex items-center justify-between">
                   <div>
                     <span className="font-bold text-sky-500 mr-2">{div.ticker}</span>
                     <span className="text-slate-400 mr-3">Отсечка: {div.date}</span>
@@ -244,7 +232,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
                     <button onClick={() => handleEdit(div)} className="p-1 text-slate-400 hover:text-sky-500">
                       <Edit3 className="w-4 h-4" />
                     </button>
-                    <button onClick={() => handleDelete(div.id)} className="p-1 text-slate-400 hover:text-rose-500">
+                    <button onClick={() => handleDelete(div.ticker, div.date)} className="p-1 text-slate-400 hover:text-rose-500">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>

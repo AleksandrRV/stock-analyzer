@@ -1,15 +1,15 @@
 // Данные о сплите/консолидации
 export interface IStockSplit {
   ticker: string;
-  date: string; // ISO 8601 UTC (Дата, когда торги пошли по новой цене)
-  coefficient: number; // New Shares / Old Shares. (Сплит 1 к 100 = 100. Консолидация 5000 к 1 = 0.0002)
+  date: string; // ISO 8601 UTC
+  coefficient: number; // New Shares / Old Shares
 }
 
 // Глобальные настройки приложения
 export interface IGlobalSettings {
   dividendTaxRate: number; // по умолчанию 15%
   tickerRenames: ITickerRename[];
-  stockSplits?: IStockSplit[]; // Пользовательские сплиты
+  stockSplits?: IStockSplit[];
 }
 
 // Переименование тикера
@@ -25,21 +25,21 @@ export type AssetType = 'STOCK' | 'FUND';
 // Актив внутри контрольной точки
 export interface IAssetAllocation {
   ticker: string;
-  weight: number; // В процентах (от 0 до 100)
+  weight: number;
   type: AssetType;
 }
 
 // Контрольная точка (Milestone)
 export interface IMilestone {
   id: string;
-  date: string; // ISO 8601 UTC (часы зафиксированы, минуты=00, секунды=00)
+  date: string; // ISO 8601 UTC
   assets: IAssetAllocation[];
 }
 
 // Портфель
 export interface IPortfolio {
   id: string;
-  groupId: string | null; // null = базовая группа
+  groupId: string | null;
   name: string;
   createdAt: string; // ISO 8601 UTC
   closedAt: string | null; // ISO 8601 UTC или null
@@ -55,7 +55,6 @@ export interface IPortfolioGroup {
 
 // Запись цены в IndexedDB
 export interface IPriceHistory {
-  id?: number;
   ticker: string;
   date: string; // YYYY-MM-DD
   price: number;
@@ -63,11 +62,10 @@ export interface IPriceHistory {
 
 // Запись дивиденда в IndexedDB
 export interface IDividendHistory {
-  id?: number;
   ticker: string;
   date: string; // YYYY-MM-DD (дата отсечки)
   value: number; // Грязный дивиденд на 1 акцию
-  isManual?: boolean; // Флаг: внесен вручную пользователем
+  isManual?: boolean; // Флаг: внесен вручную
 }
 
 // Структура файла бэкапа JSON

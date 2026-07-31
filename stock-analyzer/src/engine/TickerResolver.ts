@@ -44,12 +44,12 @@ export class TickerResolver {
     return this.resolveTicker(inputTicker, new Date().toISOString(), customRenames);
   }
 
-  /**
-   * Корректировка цен мертвых тикеров.
-   * MOEX сама корректирует живые тикеры. Если тикер не менялся - мы ничего не делим (возвращаем 1.0).
-   * Если мы смотрим старый тикер (TCSG), мы должны применить к нему сплиты наследника (T).
-   */
-  static getPriceAdjustmentToToday(rawTicker: string, dateIso: string, customRenames: ITickerRename[] = [], customSplits: IStockSplit[] = []): number {
+  static getPriceAdjustmentToToday(
+    rawTicker: string, 
+    _dateIso: string, 
+    customRenames: ITickerRename[] = [], 
+    customSplits: IStockSplit[] = []
+  ): number {
     const cleanTicker = rawTicker.trim().toUpperCase();
     const currentTicker = this.resolveTickerToCurrent(cleanTicker, customRenames);
     
@@ -69,7 +69,6 @@ export class TickerResolver {
     for (const split of allSplits) {
       if (split.ticker === currentTicker) {
         const splitTime = new Date(split.date).getTime();
-        // Применяем только те сплиты нового тикера, которые случились ПОСЛЕ "смерти" старого тикера
         if (splitTime >= renameTime) {
           cumulativeCoefficient *= split.coefficient;
         }
@@ -78,10 +77,6 @@ export class TickerResolver {
     return cumulativeCoefficient;
   }
 
-  /**
-   * Корректировка номинальных дивидендов.
-   * Дивиденды MOEX всегда отдает абсолютными. Их нужно делить на все сплиты, произошедшие после даты отсечки.
-   */
   static getDividendAdjustmentToToday(currentTicker: string, divDateIso: string, customSplits: IStockSplit[] = []): number {
     let cumulativeCoefficient = 1.0;
     const allSplits = [...DEFAULT_STOCK_SPLITS, ...customSplits];
