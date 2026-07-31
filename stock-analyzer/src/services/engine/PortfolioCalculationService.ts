@@ -5,6 +5,27 @@ import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { TickerResolver } from '../../engine/TickerResolver';
 import { UserStorage } from '../storage/userStorage';
 
+// Данные по одному месяцу
+export interface IMonthlyMatrixCell {
+  monthIndex: number; // 0..11
+  monthName: string;  // 'Янв', 'Фев'...
+  portfolioReturn: number | null; // null если портфель не существовал
+  mcftrReturn: number | null;
+  alpha: number | null;
+  isPartial: boolean; // Признак неполного месяца
+  startDateDisplay: string;
+  finishDateDisplay: string;
+}
+
+// Строка таблицы (Один календарный год)
+export interface IMonthlyMatrixRow {
+  year: number;
+  months: IMonthlyMatrixCell[];
+  yearPortfolioReturn: number | null;
+  yearMcftrReturn: number | null;
+  yearAlpha: number | null;
+}
+
 export interface ICalculatedAsset {
   ticker: string;
   resolvedTicker: string;
@@ -414,5 +435,161 @@ export class PortfolioCalculationService {
       isLoading: false,
       error: null,
     };
+  }
+
+  /**
+   * Рассчитывает матрицу доходностей строго по календарным месяцам для каждого года
+   */
+  static async calculateMonthlyReturnsMatrix(portfolio: IPortfolio): Promise<IMonthlyMatrixRow[]> {
+    const taxRate = UserStorage.getSettings().dividendTaxRate || 15;
+
+    if (!portfolio.milestones || portfolio.milestones.length === 0) return [];
+
+    const milestonesAsc = [...portfolio.milestones].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    const startDateIso = milestonesAsc[0].date;
+    const nowIso = DateTimeStandardizer.toUTCISOString(new Date());
+    const finishDateIso = portfolio.closedAt || nowIso;
+
+    const startDate = new Date(startDateIso);
+    const finishDate = new Date(finishDateIso);
+
+    const startYear = startDate.getUTCFullYear();
+    const finishYear = finishDate.getUTCFullYear();
+
+    const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+    const rows: IMonthlyMatrixRow[] = [];
+
+    // Идем от самых СВЕЖИХ годов к СТАРЫМ (например 2025, 2024, 2023)
+    for (let yr = finishYear; yr >= startYear; yr--) {
+      const cells: IMonthlyMatrixCell[] = [];
+      const yearPortfolioReturns: number[] = [];
+      const yearMcftrReturns: number[] = [];
+
+      for (let m = 0; m < 12; m++) {
+        // Начало и конец месяца
+        const firstDayOfMonth = new Date(Date.UTC(yr, m, 1, 0, 0, 0));
+        const lastDayOfMonth = new Date(Date.UTC(yr, m + 1, 0, 23, 0, 0));
+
+        // Если месяц вне периода жизни портфеля — пустая ячейка
+        if (lastDayOfMonth.getTime() < startDate.getTime() || firstDayOfMonth.getTime() > finishDate.getTime()) {
+          cells.push({
+            monthIndex: m,
+            monthName: monthNames[m],
+            portfolioReturn: null,
+            mcftrReturn: null,
+            alpha: null,
+            isPartial: false,
+            startDateDisplay: '',
+            finishDateDisplay: '',
+          });
+          continue;
+        }
+
+        // Границы расчета для месяца
+        const calcStart = firstDayOfMonth.getTime() < startDate.getTime() ? startDate : firstDayOfMonth;
+        const calcFinish = lastDayOfMonth.getTime() > finishDate.getTime() ? finishDate : lastDayOfMonth;
+
+        const isPartial = calcStart.getTime() !== firstDayOfMonth.getTime() || calcFinish.getTime() !== lastDayOfMonth.getTime();
+
+        const calcStartIso = DateTimeStandardizer.toUTCISOString(calcStart);
+        const calcFinishIso = DateTimeStandardizer.toUTCISOString(calcFinish);
+
+        // Находим активные точки
+        const calcStartTime = calcStart.getTime();
+        let activeMs = milestonesAsc[0];
+        for (const ms of milestonesAsc) {
+          if (new Date(ms.date).getTime() <= calcStartTime) {
+            activeMs = ms;
+          } else {
+            break;
+          }
+        }
+
+        // Считаем профит портфеля за месяц
+        let subWeightedProfit = 0;
+        let subTotalWeight = 0;
+
+        for (const asset of activeMs.assets) {
+          const resolved = TickerResolver.resolveTicker(asset.ticker, calcStartIso);
+          subTotalWeight += Number(asset.weight) || 0;
+
+          const pStart = await MarketDataSyncService.getOrFetchPrice(resolved, calcStartIso);
+          const pFinish = await MarketDataSyncService.getOrFetchPrice(resolved, calcFinishIso);
+
+          const p1 = pStart?.price || 0;
+          const p2 = pFinish?.price || 0;
+
+          if (p1 > 0) {
+            let divs = 0;
+            if (asset.type === 'STOCK') {
+              const allD = await MarketDataSyncService.getOrFetchDividends(resolved);
+              const d1 = DateTimeStandardizer.toMSKDateString(calcStartIso);
+              const d2 = DateTimeStandardizer.toMSKDateString(calcFinishIso);
+              divs = allD.filter(d => d.date >= d1 && d.date <= d2).reduce((s, d) => s + Number(d.value), 0) * (1 - taxRate / 100);
+            }
+            const pPct = ((p2 + divs - p1) / p1) * 100;
+            subWeightedProfit += pPct * (asset.weight / 100);
+          }
+        }
+
+        const freeCashW = Math.max(0, Math.round((100 - subTotalWeight) * 100) / 100);
+        if (freeCashW > 0) {
+          const l1 = await MarketDataSyncService.getOrFetchPrice('LQDT', calcStartIso);
+          const l2 = await MarketDataSyncService.getOrFetchPrice('LQDT', calcFinishIso);
+          const lq1 = l1?.price || 0;
+          const lq2 = l2?.price || 0;
+          if (lq1 > 0) {
+            const lqPct = ((lq2 - lq1) / lq1) * 100;
+            subWeightedProfit += lqPct * (freeCashW / 100);
+          }
+        }
+
+        // MCFTR за месяц
+        const m1 = await MarketDataSyncService.getOrFetchMCFTR(calcStartIso);
+        const m2 = await MarketDataSyncService.getOrFetchMCFTR(calcFinishIso);
+        const mc1 = m1?.price || 0;
+        const mc2 = m2?.price || 0;
+        let subMcftrPct = 0;
+        if (mc1 > 0) {
+          subMcftrPct = ((mc2 - mc1) / mc1) * 100;
+        }
+
+        const mPortfolioRet = Number(subWeightedProfit.toFixed(2));
+        const mMcftrRet = Number(subMcftrPct.toFixed(2));
+        const mAlpha = Number((mPortfolioRet - mMcftrRet).toFixed(2));
+
+        cells.push({
+          monthIndex: m,
+          monthName: monthNames[m],
+          portfolioReturn: mPortfolioRet,
+          mcftrReturn: mMcftrRet,
+          alpha: mAlpha,
+          isPartial,
+          startDateDisplay: DateTimeStandardizer.formatToLocalDisplay(calcStartIso).split(' ')[0],
+          finishDateDisplay: DateTimeStandardizer.formatToLocalDisplay(calcFinishIso).split(' ')[0],
+        });
+
+        yearPortfolioReturns.push(mPortfolioRet);
+        yearMcftrReturns.push(mMcftrRet);
+      }
+
+      // Итого за календарный год
+      const yrP = yearPortfolioReturns.length > 0 ? FinancialMath.calculateCompoundReturn(yearPortfolioReturns) : null;
+      const yrM = yearMcftrReturns.length > 0 ? FinancialMath.calculateCompoundReturn(yearMcftrReturns) : null;
+      const yrA = yrP !== null && yrM !== null ? yrP - yrM : null;
+
+      rows.push({
+        year: yr,
+        months: cells,
+        yearPortfolioReturn: yrP !== null ? Number(yrP.toFixed(2)) : null,
+        yearMcftrReturn: yrM !== null ? Number(yrM.toFixed(2)) : null,
+        yearAlpha: yrA !== null ? Number(yrA.toFixed(2)) : null,
+      });
+    }
+
+    return rows;
   }
 }

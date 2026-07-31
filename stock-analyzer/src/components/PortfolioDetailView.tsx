@@ -6,7 +6,8 @@ import { TickerResolver } from '../engine/TickerResolver';
 import { MilestoneEditorModal } from './milestones/MilestoneEditorModal';
 import { ClosePortfolioModal } from './modals/ClosePortfolioModal';
 import { usePortfolioCalculation } from '../hooks/usePortfolioCalculation';
-import { PortfolioChart } from './analytics/PortfolioChart'; // Импорт Графика
+import { PortfolioChart } from './analytics/PortfolioChart';
+import { MonthlyReturnsMatrix } from './analytics/MonthlyReturnsMatrix'; // Импорт Матрицы
 
 import { 
   ArrowLeft, 
@@ -20,7 +21,9 @@ import {
   Clock,
   TrendingUp,
   TrendingDown,
-  Loader2
+  Loader2,
+  LineChart as ChartIcon,
+  CalendarDays
 } from 'lucide-react';
 
 export const PortfolioDetailView: React.FC = () => {
@@ -39,6 +42,9 @@ export const PortfolioDetailView: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<IMilestone | null>(null);
+
+  // Таб переключения аналитики: 'CHART' (График) или 'MATRIX' (Таблица)
+  const [analyticsTab, setAnalyticsTab] = useState<'CHART' | 'MATRIX'>('CHART');
 
   if (!portfolio) {
     return (
@@ -155,7 +161,7 @@ export const PortfolioDetailView: React.FC = () => {
         </div>
       </div>
 
-      {/* ФИНАНСОВЫЙ БАННЕР */}
+      {/* ФИНАНСОВЫЙ БАННЕР И АНАЛИТИКА */}
       {loading ? (
         <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl flex items-center justify-center gap-3 text-slate-400 font-mono text-sm">
           <Loader2 className="w-5 h-5 animate-spin text-sky-500" />
@@ -212,8 +218,41 @@ export const PortfolioDetailView: React.FC = () => {
             </div>
           </div>
 
-          {/* ОБНОВЛЕННЫЙ БЛОК: ИНТЕРАКТИВНЫЙ ГРАФИК С ДИНАМИЧЕСКИМ БАЗЛАЙНОМ 0.00% */}
-          <PortfolioChart portfolio={portfolio} calculatedPortfolio={result} />
+          {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДОВ АНАЛИТИКИ (ГРАФИК / ТАБЛИЦА) */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit text-xs font-medium">
+              <button
+                onClick={() => setAnalyticsTab('CHART')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg transition-all ${
+                  analyticsTab === 'CHART'
+                    ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 font-semibold shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <ChartIcon className="w-4 h-4" />
+                <span>Кривая доходности (График)</span>
+              </button>
+
+              <button
+                onClick={() => setAnalyticsTab('MATRIX')}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all ${
+                  analyticsTab === 'MATRIX'
+                    ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 font-semibold shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                }`}
+              >
+                <CalendarDays className="w-4 h-4" />
+                <span>Доходность по месяцах</span>
+              </button>
+            </div>
+
+            {/* КОНТЕНТ АНАЛИТИКИ */}
+            {analyticsTab === 'CHART' ? (
+              <PortfolioChart portfolio={portfolio} calculatedPortfolio={result} />
+            ) : (
+              <MonthlyReturnsMatrix portfolio={portfolio} />
+            )}
+          </div>
         </div>
       ) : null}
 
