@@ -60,10 +60,17 @@ export function App() {
     };
   }, [settings.orientation]);
 
+  const orientationLockClass =
+    settings.orientation === 'portrait'
+      ? 'force-portrait-mode'
+      : settings.orientation === 'landscape'
+      ? 'force-landscape-mode'
+      : '';
+
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
+        <div className={`min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors ${orientationLockClass}`}>
           <Header activeTab={activeTab} setActiveTab={setActiveTab} />
           
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -79,7 +86,7 @@ export function App() {
           </main>
 
           <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.1.4
+            MOEX Strategy Analyzer PWA &bull; v1.1.5
           </footer>
         </div>
       </ThemeProvider>

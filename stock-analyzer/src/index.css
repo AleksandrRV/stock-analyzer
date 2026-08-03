@@ -7,3 +7,37 @@
     -webkit-tap-highlight-color: transparent;
   }
 }
+
+@media screen and (orientation: landscape) {
+  .force-portrait-mode {
+    position: fixed;
+    top: 0;
+    left: 100%;
+    width: 100vh;
+    height: 100vw;
+    overflow-y: auto;
+    transform: rotate(90deg);
+    transform-origin: left top;
+  }
+
+  body:has(.force-portrait-mode) {
+    overflow: hidden;
+  }
+}
+
+@media screen and (orientation: portrait) {
+  .force-landscape-mode {
+    position: fixed;
+    top: 100%;
+    left: 0;
+    width: 100vh;
+    height: 100vw;
+    overflow-y: auto;
+    transform: rotate(-90deg);
+    transform-origin: left top;
+  }
+
+  body:has(.force-landscape-mode) {
+    overflow: hidden;
+  }
+}
