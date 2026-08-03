@@ -17,7 +17,6 @@ export default defineConfig({
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
-        orientation: 'any',
         scope: '/stock-analyzer/',
         start_url: '/stock-analyzer/',
         icons: [

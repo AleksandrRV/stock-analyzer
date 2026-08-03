@@ -8,36 +8,61 @@
   }
 }
 
-@media screen and (orientation: landscape) {
-  .force-portrait-mode {
-    position: fixed;
-    top: 0;
-    left: 100%;
-    width: 100vh;
-    height: 100vw;
-    overflow-y: auto;
-    transform: rotate(90deg);
-    transform-origin: left top;
-  }
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
 
-  body:has(.force-portrait-mode) {
-    overflow: hidden;
+body {
+  min-height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+}
+
+#root {
+  isolation: isolate;
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.safe-gutter {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+  .safe-gutter {
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
   }
 }
 
-@media screen and (orientation: portrait) {
-  .force-landscape-mode {
-    position: fixed;
-    top: 100%;
-    left: 0;
-    width: 100vh;
-    height: 100vw;
-    overflow-y: auto;
-    transform: rotate(-90deg);
-    transform-origin: left top;
+@media (min-width: 1024px) {
+  .safe-gutter {
+    padding-left: max(2rem, env(safe-area-inset-left));
+    padding-right: max(2rem, env(safe-area-inset-right));
   }
+}
 
-  body:has(.force-landscape-mode) {
-    overflow: hidden;
-  }
+html.is-rotating,
+html.is-rotating body {
+  scroll-behavior: auto;
+}
+
+html.is-rotating *,
+html.is-rotating *::before,
+html.is-rotating *::after {
+  transition: none !important;
+  animation: none !important;
 }
