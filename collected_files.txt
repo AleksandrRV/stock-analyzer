@@ -8,10 +8,10 @@
 
 ===
 COLLECTED FILES REPORT
-Created: 2026-08-03 09:32:18
+Created: 2026-08-03 13:51:35
 Folders: stock-analyzer
 Extensions: .cs, .mtgn, .js, .bat, .md, .asmdef, .bhl, .txt, .json, .html, .tsx, .css, .ts
-Files: 50
+Files: 51
 ===
 
 CONTENTS
@@ -55,21 +55,22 @@ CONTENTS
   37. stock-analyzer/src/index.css
   38. stock-analyzer/src/main.tsx
   39. stock-analyzer/src/services/api/MoexApiGateway.ts
-  40. stock-analyzer/src/services/engine/PortfolioCalculationService.ts
-  41. stock-analyzer/src/services/storage/filePortability.ts
-  42. stock-analyzer/src/services/storage/userStorage.ts
-  43. stock-analyzer/src/services/sync/MarketDataSyncService.ts
-  44. stock-analyzer/src/store/usePortfolioStore.ts
-  45. stock-analyzer/src/types/domain.ts
-  46. stock-analyzer/src/vite-env.d.ts
-  47. stock-analyzer/tailwind.config.js
-  48. stock-analyzer/tsconfig.json
-  49. stock-analyzer/tsconfig.node.json
-  50. stock-analyzer/vite.config.ts
+  40. stock-analyzer/src/services/api/SmartLabGateway.ts
+  41. stock-analyzer/src/services/engine/PortfolioCalculationService.ts
+  42. stock-analyzer/src/services/storage/filePortability.ts
+  43. stock-analyzer/src/services/storage/userStorage.ts
+  44. stock-analyzer/src/services/sync/MarketDataSyncService.ts
+  45. stock-analyzer/src/store/usePortfolioStore.ts
+  46. stock-analyzer/src/types/domain.ts
+  47. stock-analyzer/src/vite-env.d.ts
+  48. stock-analyzer/tailwind.config.js
+  49. stock-analyzer/tsconfig.json
+  50. stock-analyzer/tsconfig.node.json
+  51. stock-analyzer/vite.config.ts
 
 ===
 
-FILE 1/50
+FILE 1/51
 PATH: MasterDocument.md
 ---
 # Мастер-документ проекта: Платформа анализа фондовых стратегий
@@ -149,7 +150,7 @@ PATH: MasterDocument.md
 
 ===
 
-FILE 2/50
+FILE 2/51
 PATH: TechSteck.md
 ---
 # Технологический стек проекта: Анализатор фондовых стратегий
@@ -206,7 +207,7 @@ PATH: TechSteck.md
 
 ===
 
-FILE 3/50
+FILE 3/51
 PATH: archtecture_and_buisnes.md
 ---
 # Архитектурные и бизнес-решения проекта (Architecture & Business Logic Notes)
@@ -301,7 +302,7 @@ PATH: archtecture_and_buisnes.md
 
 ===
 
-FILE 4/50
+FILE 4/51
 PATH: stock-analyzer/index.html
 ---
 <!DOCTYPE html>
@@ -322,7 +323,7 @@ PATH: stock-analyzer/index.html
 
 ===
 
-FILE 5/50
+FILE 5/51
 PATH: stock-analyzer/package-lock.json
 ---
 {
@@ -7748,13 +7749,13 @@ PATH: stock-analyzer/package-lock.json
 
 ===
 
-FILE 6/50
+FILE 6/51
 PATH: stock-analyzer/package.json
 ---
 {
   "name": "stock-strategy-analyzer",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -7786,7 +7787,7 @@ PATH: stock-analyzer/package.json
 
 ===
 
-FILE 7/50
+FILE 7/51
 PATH: stock-analyzer/postcss.config.js
 ---
 export default {
@@ -7798,7 +7799,7 @@ export default {
 
 ===
 
-FILE 8/50
+FILE 8/51
 PATH: stock-analyzer/src/App.tsx
 ---
 import { useState, useEffect } from 'react';
@@ -7813,12 +7814,30 @@ import { PwaInstallPrompt } from './components/common/PwaInstallPrompt';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
-  const { selectedPortfolioId, loadFromStorage } = usePortfolioStore();
+  const { selectedPortfolioId, loadFromStorage, settings } = usePortfolioStore();
 
-  // Глобальная первичная загрузка данных
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
+
+  // Активация ориентации при первом же касании любого места на смартфоне
+  useEffect(() => {
+    const handleFirstTouch = async () => {
+      if (!screen.orientation || !('lock' in screen.orientation)) return;
+      try {
+        if (settings.orientation === 'portrait') {
+          await (screen.orientation as any).lock('portrait-primary');
+        } else if (settings.orientation === 'landscape') {
+          await (screen.orientation as any).lock('landscape-primary');
+        }
+      } catch (e) {
+        // Ignored if unsupported
+      }
+    };
+
+    window.addEventListener('touchstart', handleFirstTouch, { once: true });
+    return () => window.removeEventListener('touchstart', handleFirstTouch);
+  }, [settings.orientation]);
 
   return (
     <ErrorBoundary>
@@ -7839,7 +7858,7 @@ export function App() {
           </main>
 
           <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.0.0 Release Candidate
+            MOEX Strategy Analyzer PWA &bull; v1.1.2
           </footer>
         </div>
       </ThemeProvider>
@@ -7851,7 +7870,7 @@ export default App;
 
 ===
 
-FILE 9/50
+FILE 9/51
 PATH: stock-analyzer/src/components/DashboardView.tsx
 ---
 import React, { useState } from 'react';
@@ -7880,7 +7899,7 @@ export const DashboardView: React.FC = () => {
     groups,
     activeGroupId,
     setActiveGroupId,
-    setSelectedPortfolioId,
+    openPortfolio,
     createPortfolio,
     renamePortfolio,
     deletePortfolio,
@@ -7902,15 +7921,11 @@ export const DashboardView: React.FC = () => {
   const visiblePortfolios = getVisiblePortfolios();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       
-      {/* ВЕРХНЯЯ ПАНЕЛЬ */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Ваши портфели</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Управляйте инвестиционными стратегиями и группами
-          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -7932,7 +7947,6 @@ export const DashboardView: React.FC = () => {
         </div>
       </div>
 
-      {/* ТАБЫ ГРУПП */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-2 scrollbar-none">
         <button
           onClick={() => setActiveGroupId(null)}
@@ -7984,14 +7998,14 @@ export const DashboardView: React.FC = () => {
         </button>
       </div>
 
-      {/* СЕТКА КАРТОЧЕК ПОРТФЕЛЕЙ */}
       {visiblePortfolios.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           {visiblePortfolios.map(portfolio => (
             <PortfolioCard
               key={portfolio.id}
               portfolio={portfolio}
-              onOpen={() => setSelectedPortfolioId(portfolio.id)}
+              onOpen={() => openPortfolio(portfolio.id, 'default')}
+              onOpenAnalytics={() => openPortfolio(portfolio.id, 'analytics')}
               onRename={() => setEditingPortfolio(portfolio)}
               onMove={() => setMovingPortfolio(portfolio)}
               onDelete={() => setDeletingPortfolio(portfolio)}
@@ -8013,7 +8027,6 @@ export const DashboardView: React.FC = () => {
         </div>
       )}
 
-      {/* СКЛАД: Сворачиваемая песочница */}
       <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
         <button
           onClick={() => setShowDebug(!showDebug)}
@@ -8026,7 +8039,6 @@ export const DashboardView: React.FC = () => {
         {showDebug && <DebugPanel />}
       </div>
 
-      {/* МОДАЛЬНЫЕ ОКНА */}
       <CreatePortfolioModal
         isOpen={isCreatePortModalOpen}
         onSave={(name) => createPortfolio(name)}
@@ -8074,7 +8086,7 @@ export const DashboardView: React.FC = () => {
 
 ===
 
-FILE 10/50
+FILE 10/51
 PATH: stock-analyzer/src/components/DebugPanel.tsx
 ---
 import React, { useState } from 'react';
@@ -8359,7 +8371,7 @@ export const DebugPanel: React.FC = () => {
 
 ===
 
-FILE 11/50
+FILE 11/51
 PATH: stock-analyzer/src/components/Header.tsx
 ---
 import React from 'react';
@@ -8449,7 +8461,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
 
 ===
 
-FILE 12/50
+FILE 12/51
 PATH: stock-analyzer/src/components/PortfolioCard.tsx
 ---
 import React from 'react';
@@ -8462,15 +8474,16 @@ import {
   Edit3, 
   FolderInput, 
   Trash2, 
-  ChevronRight, 
   TrendingUp, 
   TrendingDown, 
-  Loader2 
+  Loader2,
+  LineChart as ChartIcon
 } from 'lucide-react';
 
 interface Props {
   portfolio: IPortfolio;
   onOpen: () => void;
+  onOpenAnalytics: () => void;
   onRename: () => void;
   onMove: () => void;
   onDelete: () => void;
@@ -8479,6 +8492,7 @@ interface Props {
 export const PortfolioCard: React.FC<Props> = ({
   portfolio,
   onOpen,
+  onOpenAnalytics,
   onRename,
   onMove,
   onDelete,
@@ -8504,7 +8518,7 @@ export const PortfolioCard: React.FC<Props> = ({
   return (
     <div
       onClick={onOpen}
-      className={`bg-white dark:bg-slate-800 border rounded-2xl p-5 space-y-4 shadow-sm hover:shadow-md transition-all relative cursor-pointer group ${
+      className={`bg-white dark:bg-slate-800 border rounded-xl p-4 space-y-3 shadow-sm hover:shadow-md transition-all relative cursor-pointer group ${
         result?.performanceColor === 'GREEN'
           ? 'hover:border-emerald-500/50'
           : result?.performanceColor === 'YELLOW'
@@ -8512,11 +8526,10 @@ export const PortfolioCard: React.FC<Props> = ({
           : 'hover:border-slate-300 dark:hover:border-slate-600'
       }`}
     >
-      {/* ШАПКА КАРТОЧКИ */}
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="font-bold text-lg leading-snug group-hover:text-sky-500 transition-colors">
+            <h3 className="font-bold text-base leading-snug group-hover:text-sky-500 transition-colors">
               {portfolio.name}
             </h3>
             {portfolio.closedAt && (
@@ -8525,9 +8538,7 @@ export const PortfolioCard: React.FC<Props> = ({
               </span>
             )}
           </div>
-          
-          {/* Создан и Срок службы в днях */}
-          <span className="text-xs text-slate-400 font-mono">
+          <span className="text-[11px] text-slate-400 font-mono">
             Создан: {DateTimeStandardizer.formatToLocalDisplay(portfolio.createdAt).split(' ')[0]}
             {result && result.totalDays > 0 && (
               <span className="text-slate-500 font-semibold"> ({result.totalDays} дн.)</span>
@@ -8535,17 +8546,23 @@ export const PortfolioCard: React.FC<Props> = ({
           </span>
         </div>
 
-        {/* МЕНЮ ДЕЙСТВИЙ */}
         <div className="relative" onClick={e => e.stopPropagation()}>
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700"
           >
-            <MoreVertical className="w-5 h-5" />
+            <MoreVertical className="w-4 h-4" />
           </button>
 
           {isMenuOpen && (
             <div className="absolute right-0 top-8 z-10 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-1 space-y-0.5 text-sm animate-in fade-in duration-150">
+              <button
+                onClick={() => { onOpenAnalytics(); setIsMenuOpen(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sky-600 dark:text-sky-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-left font-semibold"
+              >
+                <ChartIcon className="w-4 h-4" />
+                <span>Аналитика</span>
+              </button>
               <button
                 onClick={() => { onRename(); setIsMenuOpen(false); }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg text-left"
@@ -8572,40 +8589,34 @@ export const PortfolioCard: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* РАСЧЕТНЫЕ ПОКАЗАТЕЛИ ПОРТФЕЛЯ */}
       {loading ? (
         <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl flex items-center justify-center gap-2 text-xs text-slate-400 font-mono">
           <Loader2 className="w-4 h-4 animate-spin text-sky-500" />
-          <span>Загрузка котировок MOEX...</span>
+          <span>Загрузка...</span>
         </div>
       ) : portfolio.milestones.length === 0 ? (
         <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl text-center text-xs text-slate-400 font-mono">
-          Добавьте контрольную точку
+          Добавьте точку
         </div>
       ) : result ? (
-        <div className="space-y-2.5">
-          <div className={`p-2.5 rounded-xl border flex items-center justify-between font-mono ${getColorStyles()}`}>
-            <span className="text-xs font-semibold">Альфа (vs MCFTR):</span>
+        <div className="space-y-2">
+          <div className={`p-2 rounded-lg border flex items-center justify-between font-mono ${getColorStyles()}`}>
+            <span className="text-[11px] font-semibold">Альфа (vs MCFTR):</span>
             <span className="text-sm font-bold flex items-center gap-1">
-              {result.alphaMonthlyPercent >= 0 ? (
-                <TrendingUp className="w-4 h-4" />
-              ) : (
-                <TrendingDown className="w-4 h-4" />
-              )}
-              {result.alphaMonthlyPercent >= 0 ? '+' : ''}
-              {result.alphaMonthlyPercent.toFixed(2)}% / мес
+              {result.alphaMonthlyPercent >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+              {result.alphaMonthlyPercent >= 0 ? '+' : ''}{result.alphaMonthlyPercent.toFixed(2)}%
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-            <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">Портфель (Мес):</span>
+          <div className="grid grid-cols-2 gap-2 font-mono">
+            <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-lg flex items-center justify-between text-[11px]">
+              <span className="text-slate-400">Портфель:</span>
               <span className={`font-bold ${result.monthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {result.monthlyReturnPercent >= 0 ? '+' : ''}{result.monthlyReturnPercent.toFixed(2)}%
               </span>
             </div>
-            <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-lg">
-              <span className="text-[10px] text-slate-400 block">MCFTR (Мес):</span>
+            <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-lg flex items-center justify-between text-[11px]">
+              <span className="text-slate-400">MCFTR:</span>
               <span className={`font-bold ${result.mcftrMonthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {result.mcftrMonthlyReturnPercent >= 0 ? '+' : ''}{result.mcftrMonthlyReturnPercent.toFixed(2)}%
               </span>
@@ -8613,21 +8624,13 @@ export const PortfolioCard: React.FC<Props> = ({
           </div>
         </div>
       ) : null}
-
-      <div className="pt-2 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between text-xs font-mono">
-        <span className="text-slate-400">Точек: {portfolio.milestones.length}</span>
-        <span className="text-sky-500 font-semibold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-          <span>Аналитика</span>
-          <ChevronRight className="w-3.5 h-3.5" />
-        </span>
-      </div>
     </div>
   );
 };
 
 ===
 
-FILE 13/50
+FILE 13/51
 PATH: stock-analyzer/src/components/PortfolioDetailView.tsx
 ---
 import React, { useState } from 'react';
@@ -8639,7 +8642,7 @@ import { MilestoneEditorModal } from './milestones/MilestoneEditorModal';
 import { ClosePortfolioModal } from './modals/ClosePortfolioModal';
 import { usePortfolioCalculation } from '../hooks/usePortfolioCalculation';
 import { PortfolioChart } from './analytics/PortfolioChart';
-import { MonthlyReturnsMatrix } from './analytics/MonthlyReturnsMatrix'; // Импорт Матрицы
+import { MonthlyReturnsMatrix } from './analytics/MonthlyReturnsMatrix';
 
 import { 
   ArrowLeft, 
@@ -8655,13 +8658,159 @@ import {
   TrendingDown,
   Loader2,
   LineChart as ChartIcon,
-  CalendarDays
+  CalendarDays,
+  ChevronDown,
+  ChevronUp,
+  ChevronRight
 } from 'lucide-react';
+
+const MilestoneItem: React.FC<{
+  milestone: IMilestone;
+  idx: number;
+  totalLength: number;
+  calcMs: any;
+  settings: any;
+  handleDuplicate: (m: IMilestone) => void;
+  handleEdit: (m: IMilestone) => void;
+  handleDelete: (id: string) => void;
+}> = ({ milestone, idx, totalLength, calcMs, settings, handleDuplicate, handleEdit, handleDelete }) => {
+  const [isAssetsOpen, setIsAssetsOpen] = useState(false);
+  const chronologicalIndex = totalLength - idx;
+
+  const allocatedSum = milestone.assets.reduce((sum, a) => sum + Number(a.weight), 0);
+  const freeCash = Math.max(0, Math.round((100 - allocatedSum) * 100) / 100);
+
+  return (
+    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 rounded-2xl p-4 shadow-sm transition-all">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2">
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-sky-500/10 text-sky-500 rounded-lg font-mono text-[11px] font-bold">
+            #{chronologicalIndex}
+          </div>
+          <div>
+            <div className="font-bold font-mono text-sm flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-slate-400" />
+              <span>{DateTimeStandardizer.formatToLocalDisplay(milestone.date)}</span>
+              {calcMs && (
+                <span className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 text-[10px] font-semibold rounded">
+                  {calcMs.durationDays >= 1 ? `${calcMs.durationDays} дн.` : `${calcMs.durationHours} ч.`}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono">UTC: {milestone.date}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {calcMs && (
+            <div className="flex items-center gap-1 font-mono text-[10px]">
+              <div className="px-2 py-0.5 bg-slate-100 dark:bg-slate-900 rounded border border-transparent">
+                <span className="text-slate-400">П: </span>
+                <span className={`font-bold ${calcMs.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {calcMs.totalProfitPercent >= 0 ? '+' : ''}{calcMs.totalProfitPercent.toFixed(2)}%
+                </span>
+              </div>
+              <div className="px-2 py-0.5 bg-slate-100 dark:bg-slate-900 rounded border border-transparent">
+                <span className="text-slate-400">И: </span>
+                <span className={`font-bold ${calcMs.mcftrProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                  {calcMs.mcftrProfitPercent >= 0 ? '+' : ''}{calcMs.mcftrProfitPercent.toFixed(2)}%
+                </span>
+              </div>
+              <div className={`px-2 py-0.5 rounded font-bold border ${
+                calcMs.mcftrAlphaPercent > 0.9 ? 'bg-emerald-500/10 text-emerald-600 dark:border-emerald-500/30'
+                : calcMs.mcftrAlphaPercent >= 0.01 ? 'bg-amber-500/10 text-amber-600 dark:border-amber-500/30'
+                : 'bg-rose-500/10 text-rose-600 dark:border-rose-500/30'
+              }`}>
+                {calcMs.mcftrAlphaPercent >= 0 ? '+' : ''}{calcMs.mcftrAlphaPercent.toFixed(2)}%
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-0.5 border-l border-slate-200 dark:border-slate-700 pl-2">
+            <button onClick={() => handleDuplicate(milestone)} className="p-1.5 text-slate-400 hover:text-sky-500" title="Дублировать"><Copy className="w-3.5 h-3.5" /></button>
+            <button onClick={() => handleEdit(milestone)} className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200" title="Редактировать"><Edit3 className="w-3.5 h-3.5" /></button>
+            <button onClick={() => handleDelete(milestone.id)} className="p-1.5 text-slate-400 hover:text-rose-500" title="Удалить"><Trash2 className="w-3.5 h-3.5" /></button>
+          </div>
+        </div>
+      </div>
+
+      <button
+        onClick={() => setIsAssetsOpen(!isAssetsOpen)}
+        className="flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 w-full pt-2 border-t border-slate-100 dark:border-slate-700/60 transition-colors"
+      >
+        {isAssetsOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        <span>{isAssetsOpen ? 'Скрыть состав' : `Показать состав (${milestone.assets.length} акт.)`}</span>
+        {!isAssetsOpen && freeCash > 0 && <span className="text-emerald-500 font-mono ml-auto">LQDT: {freeCash}%</span>}
+      </button>
+
+      {isAssetsOpen && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 pt-3 animate-in fade-in duration-200">
+          {milestone.assets.map(asset => {
+            const resolved = TickerResolver.resolveTicker(asset.ticker, milestone.date, settings.tickerRenames);
+            const calcAsset = calcMs?.assets.find((a: any) => a.ticker === asset.ticker);
+
+            return (
+              <div key={asset.ticker} className="p-2.5 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-100 dark:border-slate-800 text-[11px] space-y-1 font-mono">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <span className="font-bold text-sky-500">{asset.ticker}</span>
+                    {resolved !== asset.ticker && <span className="text-[9px] text-purple-400 block">({resolved})</span>}
+                  </div>
+                  <span className="font-semibold px-1 py-0.5 bg-slate-200 dark:bg-slate-800 rounded">{asset.weight}%</span>
+                </div>
+                {calcAsset && (
+                  <div className="space-y-0.5 text-[10px] text-slate-500 border-t border-slate-200 dark:border-slate-800 pt-1">
+                    <div className="flex justify-between">
+                      <span>Цены:</span>
+                      <span>{calcAsset.startPrice} → {calcAsset.finishPrice} ₽</span>
+                    </div>
+                    {calcAsset.rawDividends > 0 && (
+                      <div className="flex justify-between text-emerald-500 font-semibold">
+                        <span>Дивы:</span>
+                        <span>+{calcAsset.netDividends.toFixed(2)} ₽</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-bold pt-0.5 border-t border-dashed">
+                      <span>Профит:</span>
+                      <span className={calcAsset.profitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
+                        {calcAsset.profitPercent >= 0 ? '+' : ''}{calcAsset.profitPercent.toFixed(2)}%
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {calcMs && freeCash > 0 && (
+            <div className="p-2.5 bg-emerald-500/5 dark:bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-[11px] space-y-1 font-mono">
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-emerald-600 dark:text-emerald-400">LQDT (Кэш)</span>
+                <span className="font-semibold px-1 py-0.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded">{freeCash.toFixed(2)}%</span>
+              </div>
+              <div className="space-y-0.5 text-[10px] text-slate-500 border-t border-emerald-500/20 pt-1">
+                <div className="flex justify-between">
+                  <span>Цены:</span>
+                  <span>{calcMs.lqdtStartPrice} → {calcMs.lqdtFinishPrice} ₽</span>
+                </div>
+                <div className="flex justify-between font-bold pt-0.5 border-t border-dashed border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                  <span>Профит:</span>
+                  <span>+{calcMs.lqdtProfitPercent.toFixed(2)}%</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const PortfolioDetailView: React.FC = () => {
   const { 
+    settings,
+    openPortfolioMode,
     getSelectedPortfolio, 
-    setSelectedPortfolioId, 
+    openPortfolio, 
     addMilestone, 
     updateMilestone, 
     deleteMilestone,
@@ -8675,430 +8824,156 @@ export const PortfolioDetailView: React.FC = () => {
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<IMilestone | null>(null);
 
-  // Таб переключения аналитики: 'CHART' (График) или 'MATRIX' (Таблица)
   const [analyticsTab, setAnalyticsTab] = useState<'CHART' | 'MATRIX'>('CHART');
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(openPortfolioMode === 'analytics');
+  const [isMilestonesOpen, setIsMilestonesOpen] = useState(openPortfolioMode === 'default');
 
   if (!portfolio) {
     return (
       <div className="text-center py-12">
         <p className="text-slate-400">Портфель не найден</p>
-        <button
-          onClick={() => setSelectedPortfolioId(null)}
-          className="mt-4 px-4 py-2 bg-sky-500 text-white rounded-xl text-sm"
-        >
+        <button onClick={() => openPortfolio(null)} className="mt-4 px-4 py-2 bg-sky-500 text-white rounded-xl text-sm">
           Вернуться на Дашборд
         </button>
       </div>
     );
   }
 
-  const sortedMilestones = [...portfolio.milestones].sort(
-    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-  );
-
+  const sortedMilestones = [...portfolio.milestones].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   const latestMilestoneDateIso = sortedMilestones.length > 0 ? sortedMilestones[0].date : null;
 
   const handleOpenNewMilestone = () => {
     let prefilledAssets: IAssetAllocation[] = [];
-    if (sortedMilestones.length > 0) {
-      prefilledAssets = sortedMilestones[0].assets.map(a => ({ ...a }));
-    }
-    const nowIso = DateTimeStandardizer.toUTCISOString(new Date());
-
-    setEditingMilestone({
-      id: `new_${Date.now()}`,
-      date: nowIso,
-      assets: prefilledAssets,
-    });
-    setIsEditorOpen(true);
-  };
-
-  const handleDuplicateMilestone = (sourceMilestone: IMilestone) => {
-    setEditingMilestone({
-      id: `new_${Date.now()}`,
-      date: sourceMilestone.date,
-      assets: sourceMilestone.assets.map(a => ({ ...a })),
-    });
+    if (sortedMilestones.length > 0) prefilledAssets = sortedMilestones[0].assets.map(a => ({ ...a }));
+    setEditingMilestone({ id: `new_${Date.now()}`, date: DateTimeStandardizer.toUTCISOString(new Date()), assets: prefilledAssets });
     setIsEditorOpen(true);
   };
 
   const handleSaveMilestone = (milestone: IMilestone) => {
-    const exists = portfolio.milestones.some(m => m.id === milestone.id);
-    if (exists) {
-      updateMilestone(portfolio.id, milestone);
-    } else {
-      addMilestone(portfolio.id, milestone);
-    }
-  };
-
-  const handleToggleClosePortfolio = () => {
-    if (portfolio.closedAt) {
-      closePortfolio(portfolio.id, null);
-    } else {
-      setIsCloseModalOpen(true);
-    }
+    portfolio.milestones.some(m => m.id === milestone.id) ? updateMilestone(portfolio.id, milestone) : addMilestone(portfolio.id, milestone);
+    setIsMilestonesOpen(true);
   };
 
   return (
     <div className="space-y-6">
-      
-      {/* ШАПКА ПОРТФЕЛЯ */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setSelectedPortfolioId(null)}
-            className="p-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl transition-colors"
-            title="Назад к Дашборду"
-          >
+          <button onClick={() => openPortfolio(null)} className="p-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-xl transition-colors">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-bold tracking-tight">{portfolio.name}</h2>
-              {portfolio.closedAt && (
-                <span className="px-2 py-0.5 bg-rose-500/10 text-rose-500 border border-rose-500/20 text-xs font-semibold rounded-md">
-                  Закрыт {DateTimeStandardizer.formatToLocalDisplay(portfolio.closedAt).split(' ')[0]}
-                </span>
-              )}
+              {portfolio.closedAt && <span className="px-2 py-0.5 bg-rose-500/10 text-rose-500 text-[10px] font-semibold rounded-md">Закрыт</span>}
             </div>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              Создан: {DateTimeStandardizer.formatToLocalDisplay(portfolio.createdAt)}
-              {result && result.totalDays > 0 && (
-                <span className="text-slate-500 font-semibold"> ({result.totalDays} дн.)</span>
-              )}
+            <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+              Создан: {DateTimeStandardizer.formatToLocalDisplay(portfolio.createdAt).split(' ')[0]}
+              {result && result.totalDays > 0 && <span className="text-slate-500 font-semibold"> ({result.totalDays} дн.)</span>}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleToggleClosePortfolio}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border transition-colors ${
-              portfolio.closedAt
-                ? 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
-                : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-            }`}
-          >
+          <button onClick={() => portfolio.closedAt ? closePortfolio(portfolio.id, null) : setIsCloseModalOpen(true)} className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium border transition-colors ${portfolio.closedAt ? 'bg-amber-500/10 border-amber-500/20 text-amber-600' : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 hover:bg-slate-200'}`}>
             {portfolio.closedAt ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-            <span>{portfolio.closedAt ? 'Открыть портфель' : 'Зафиксировать закрытие'}</span>
+            <span className="hidden sm:inline">{portfolio.closedAt ? 'Открыть' : 'Закрыть'}</span>
           </button>
-
-          <button
-            onClick={handleOpenNewMilestone}
-            className="flex items-center gap-2 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-medium text-sm rounded-xl shadow-sm transition-all"
-          >
+          <button onClick={handleOpenNewMilestone} className="flex items-center gap-2 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-medium text-sm rounded-xl shadow-sm transition-all">
             <CalendarPlus className="w-4 h-4" />
             <span>Добавить точку</span>
           </button>
         </div>
       </div>
 
-      {/* ФИНАНСОВЫЙ БАННЕР И АНАЛИТИКА */}
-      {loading ? (
-        <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl flex items-center justify-center gap-3 text-slate-400 font-mono text-sm">
-          <Loader2 className="w-5 h-5 animate-spin text-sky-500" />
-          <span>Загрузка цен, дивидендов и индексов MOEX...</span>
-        </div>
-      ) : result && portfolio.milestones.length > 0 ? (
-        <div className="space-y-6">
-          <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">
-                Результат стратегии (За {result.totalDays} дней)
-              </span>
-
-              <div className={`px-3 py-1 rounded-full border text-xs font-mono font-bold flex items-center gap-1.5 w-fit ${
-                result.performanceColor === 'GREEN'
-                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                  : result.performanceColor === 'YELLOW'
-                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-              }`}>
-                {result.alphaMonthlyPercent >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                <span>Альфа: {result.alphaMonthlyPercent >= 0 ? '+' : ''}{result.alphaMonthlyPercent.toFixed(2)}% / мес</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-sm">
-              <div>
-                <span className="text-[11px] text-slate-400 block">Общий профит:</span>
-                <span className={`text-lg font-bold ${result.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {result.totalProfitPercent >= 0 ? '+' : ''}{result.totalProfitPercent.toFixed(2)}%
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">В месяц (CAGR):</span>
-                <span className={`text-lg font-bold ${result.monthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {result.monthlyReturnPercent >= 0 ? '+' : ''}{result.monthlyReturnPercent.toFixed(2)}%
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">Годовая (CAGR):</span>
-                <span className={`text-lg font-bold ${result.annualizedReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {result.annualizedReturnPercent >= 0 ? '+' : ''}{result.annualizedReturnPercent.toFixed(2)}%
-                </span>
-              </div>
-
-              <div>
-                <span className="text-[11px] text-slate-400 block">MCFTR (в мес):</span>
-                <span className={`text-lg font-bold ${result.mcftrMonthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                  {result.mcftrMonthlyReturnPercent >= 0 ? '+' : ''}{result.mcftrMonthlyReturnPercent.toFixed(2)}%
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* ПЕРЕКЛЮЧАТЕЛЬ ВИДОВ АНАЛИТИКИ (ГРАФИК / ТАБЛИЦА) */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit text-xs font-medium">
-              <button
-                onClick={() => setAnalyticsTab('CHART')}
-                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg transition-all ${
-                  analyticsTab === 'CHART'
-                    ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 font-semibold shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                <ChartIcon className="w-4 h-4" />
-                <span>Кривая доходности (График)</span>
-              </button>
-
-              <button
-                onClick={() => setAnalyticsTab('MATRIX')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg transition-all ${
-                  analyticsTab === 'MATRIX'
-                    ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-400 font-semibold shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                <CalendarDays className="w-4 h-4" />
-                <span>Доходность по месяцах</span>
-              </button>
-            </div>
-
-            {/* КОНТЕНТ АНАЛИТИКИ */}
-            {analyticsTab === 'CHART' ? (
-              <PortfolioChart portfolio={portfolio} calculatedPortfolio={result} />
-            ) : (
-              <MonthlyReturnsMatrix portfolio={portfolio} />
-            )}
-          </div>
-        </div>
-      ) : null}
-
-      {/* СПИСОК КОНТРОЛЬНЫХ ТОЧЕК */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-bold">Контрольные точки ({portfolio.milestones.length})</h3>
-          <span className="text-xs text-slate-400">Свежие — сверху</span>
-        </div>
-
-        {sortedMilestones.length === 0 ? (
-          <div className="border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center">
-            <div className="w-12 h-12 bg-sky-500/10 text-sky-500 rounded-2xl flex items-center justify-center mx-auto mb-3">
-              <Calendar className="w-6 h-6" />
-            </div>
-            <h4 className="font-semibold text-base mb-1">Точки среза пока не заданы</h4>
-            <p className="text-sm text-slate-500 dark:text-slate-400 max-w-sm mx-auto mb-4">
-              Добавьте хотя бы одну контрольную точку с датой, часом и составом акций для старта расчета стратегии.
-            </p>
-            <button
-              onClick={handleOpenNewMilestone}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-sky-500 text-white font-medium text-sm rounded-xl shadow-sm hover:bg-sky-600 transition-colors"
-            >
-              <CalendarPlus className="w-4 h-4" />
-              <span>Добавить первую точку</span>
-            </button>
+        <button onClick={() => setIsAnalyticsOpen(!isAnalyticsOpen)} className="w-full flex items-center justify-between bg-slate-100 dark:bg-slate-800 p-3 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+          <div className="flex items-center gap-2 font-bold text-sm text-slate-700 dark:text-slate-200">
+            <ChartIcon className="w-4 h-4 text-sky-500" />
+            <span>Аналитика и Финансовый результат</span>
           </div>
-        ) : (
-          <div className="space-y-4">
-            {sortedMilestones.map((milestone, idx) => {
-              const chronologicalIndex = portfolio.milestones.length - idx;
-              const calcMs = result?.calculatedMilestones.find(m => m.milestoneId === milestone.id);
+          {isAnalyticsOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        </button>
 
-              return (
-                <div
-                  key={milestone.id}
-                  className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 rounded-2xl p-5 space-y-4 shadow-sm hover:border-slate-300 dark:hover:border-slate-600 transition-all"
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl font-mono text-xs font-bold">
-                        #{chronologicalIndex}
-                      </div>
-                      <div>
-                        <div className="font-bold font-mono text-base flex items-center gap-2">
-                          <Clock className="w-4 h-4 text-slate-400" />
-                          <span>{DateTimeStandardizer.formatToLocalDisplay(milestone.date)}</span>
-                          
-                          {calcMs && (
-                            <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 text-xs font-semibold rounded-md">
-                              {calcMs.durationDays >= 1 ? `${calcMs.durationDays} дн.` : `${calcMs.durationHours} ч.`}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-slate-400 font-mono">UTC: {milestone.date}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {calcMs && (
-                        <div className="flex items-center gap-2 font-mono text-xs">
-                          <div className="px-2.5 py-1 bg-slate-100 dark:bg-slate-900 rounded-lg">
-                            <span className="text-slate-400">Профит: </span>
-                            <span className={`font-bold ${calcMs.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                              {calcMs.totalProfitPercent >= 0 ? '+' : ''}{calcMs.totalProfitPercent.toFixed(2)}%
-                            </span>
-                          </div>
-
-                          <div className="px-2.5 py-1 bg-slate-100 dark:bg-slate-900 rounded-lg">
-                            <span className="text-slate-400">MCFTR: </span>
-                            <span className={`font-bold ${calcMs.mcftrProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                              {calcMs.mcftrProfitPercent >= 0 ? '+' : ''}{calcMs.mcftrProfitPercent.toFixed(2)}%
-                            </span>
-                          </div>
-
-                          <div className={`px-2.5 py-1 rounded-lg font-bold border ${
-                            calcMs.mcftrAlphaPercent > 0.9
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                              : calcMs.mcftrAlphaPercent >= 0.01
-                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
-                              : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-                          }`}>
-                            Разница: {calcMs.mcftrAlphaPercent >= 0 ? '+' : ''}{calcMs.mcftrAlphaPercent.toFixed(2)}%
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleDuplicateMilestone(milestone)}
-                          className="p-1.5 text-slate-400 hover:text-sky-500 rounded-lg hover:bg-sky-50 dark:hover:bg-sky-950/30 transition-colors"
-                          title="Скопировать точку"
-                        >
-                          <Copy className="w-4 h-4" />
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            setEditingMilestone(milestone);
-                            setIsEditorOpen(true);
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
-                          title="Редактировать точку"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-
-                        <button
-                          onClick={() => deleteMilestone(portfolio.id, milestone.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-500 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
-                          title="Удалить точку"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* СОСТАВ БУМАГ */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                    {milestone.assets.map(asset => {
-                      const resolved = TickerResolver.resolveTicker(asset.ticker, milestone.date);
-                      const calcAsset = calcMs?.assets.find(a => a.ticker === asset.ticker);
-
-                      return (
-                        <div
-                          key={asset.ticker}
-                          className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-100 dark:border-slate-800 text-xs space-y-1.5 font-mono"
-                        >
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <span className="font-bold text-sky-500">{asset.ticker}</span>
-                              {resolved !== asset.ticker && (
-                                <span className="text-[10px] text-purple-400 block">({resolved})</span>
-                              )}
-                            </div>
-                            <span className="font-semibold px-1.5 py-0.5 bg-slate-200 dark:bg-slate-800 rounded">
-                              {asset.weight}%
-                            </span>
-                          </div>
-
-                          {calcAsset && (
-                            <div className="space-y-0.5 text-[11px] text-slate-500 border-t border-slate-200 dark:border-slate-800 pt-1.5">
-                              <div className="flex justify-between">
-                                <span>Цены:</span>
-                                <span>{calcAsset.startPrice} → {calcAsset.finishPrice} ₽</span>
-                              </div>
-                              {calcAsset.rawDividends > 0 && (
-                                <div className="flex justify-between text-emerald-500 font-semibold">
-                                  <span>Дивы (чистыми):</span>
-                                  <span>+{calcAsset.netDividends.toFixed(2)} ₽</span>
-                                </div>
-                              )}
-                              <div className="flex justify-between font-bold pt-0.5 border-t border-dashed">
-                                <span>Профит:</span>
-                                <span className={calcAsset.profitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
-                                  {calcAsset.profitPercent >= 0 ? '+' : ''}{calcAsset.profitPercent.toFixed(2)}%
-                                </span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {calcMs && calcMs.freeCashWeight > 0 && (
-                      <div className="p-3 bg-emerald-500/5 dark:bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-xs space-y-1.5 font-mono">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-emerald-600 dark:text-emerald-400">LQDT (Кэш)</span>
-                          <span className="font-semibold px-1.5 py-0.5 bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded">
-                            {calcMs.freeCashWeight.toFixed(2)}%
-                          </span>
-                        </div>
-                        <div className="space-y-0.5 text-[11px] text-slate-500 border-t border-emerald-500/20 pt-1.5">
-                          <div className="flex justify-between">
-                            <span>Цены:</span>
-                            <span>{calcMs.lqdtStartPrice} → {calcMs.lqdtFinishPrice} ₽</span>
-                          </div>
-                          <div className="flex justify-between font-bold pt-0.5 border-t border-dashed border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
-                            <span>Профит:</span>
-                            <span>+{calcMs.lqdtProfitPercent.toFixed(2)}%</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+        {isAnalyticsOpen && (
+          loading ? (
+            <div className="p-6 bg-white dark:bg-slate-800 border rounded-2xl flex items-center justify-center gap-3 text-slate-400 font-mono text-sm">
+              <Loader2 className="w-5 h-5 animate-spin text-sky-500" /><span>Загрузка данных...</span>
+            </div>
+          ) : result && portfolio.milestones.length > 0 ? (
+            <div className="space-y-6 animate-in fade-in slide-in-from-top-2">
+              <div className="p-5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider font-mono">За {result.totalDays} дней</span>
+                  <div className={`px-3 py-1 rounded-full border text-xs font-mono font-bold flex items-center gap-1.5 w-fit ${result.performanceColor === 'GREEN' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : result.performanceColor === 'YELLOW' ? 'bg-amber-500/10 text-amber-600 border-amber-500/30' : 'bg-rose-500/10 text-rose-600 border-rose-500/30'}`}>
+                    {result.alphaMonthlyPercent >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
+                    <span>Альфа: {result.alphaMonthlyPercent >= 0 ? '+' : ''}{result.alphaMonthlyPercent.toFixed(2)}% / мес</span>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-sm">
+                  <div><span className="text-[11px] text-slate-400 block">Общий профит:</span><span className={`text-base font-bold ${result.totalProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{result.totalProfitPercent >= 0 ? '+' : ''}{result.totalProfitPercent.toFixed(2)}%</span></div>
+                  <div><span className="text-[11px] text-slate-400 block">В месяц (CAGR):</span><span className={`text-base font-bold ${result.monthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{result.monthlyReturnPercent >= 0 ? '+' : ''}{result.monthlyReturnPercent.toFixed(2)}%</span></div>
+                  <div><span className="text-[11px] text-slate-400 block">Годовая (CAGR):</span><span className={`text-base font-bold ${result.annualizedReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{result.annualizedReturnPercent >= 0 ? '+' : ''}{result.annualizedReturnPercent.toFixed(2)}%</span></div>
+                  <div><span className="text-[11px] text-slate-400 block">MCFTR (в мес):</span><span className={`text-base font-bold ${result.mcftrMonthlyReturnPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>{result.mcftrMonthlyReturnPercent >= 0 ? '+' : ''}{result.mcftrMonthlyReturnPercent.toFixed(2)}%</span></div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl w-fit text-xs font-medium">
+                  <button onClick={() => setAnalyticsTab('CHART')} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all ${analyticsTab === 'CHART' ? 'bg-white dark:bg-slate-700 text-sky-600 font-semibold shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}><ChartIcon className="w-4 h-4" /><span className="hidden sm:inline">График</span></button>
+                  <button onClick={() => setAnalyticsTab('MATRIX')} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg transition-all ${analyticsTab === 'MATRIX' ? 'bg-white dark:bg-slate-700 text-sky-600 font-semibold shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}><CalendarDays className="w-4 h-4" /><span className="hidden sm:inline">По месяцам</span></button>
+                </div>
+                {analyticsTab === 'CHART' ? <PortfolioChart portfolio={portfolio} calculatedPortfolio={result} /> : <MonthlyReturnsMatrix portfolio={portfolio} />}
+              </div>
+            </div>
+          ) : null
         )}
       </div>
 
-      {/* Модалки */}
-      <MilestoneEditorModal
-        isOpen={isEditorOpen}
-        initialMilestone={editingMilestone}
-        onSave={handleSaveMilestone}
-        onClose={() => setIsEditorOpen(false)}
-      />
+      <div className="space-y-4">
+        <button onClick={() => setIsMilestonesOpen(!isMilestonesOpen)} className="w-full flex items-center justify-between bg-slate-100 dark:bg-slate-800 p-3 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+          <div className="flex items-center gap-2 font-bold text-sm text-slate-700 dark:text-slate-200">
+            <Calendar className="w-4 h-4 text-sky-500" />
+            <span>Контрольные точки ({portfolio.milestones.length})</span>
+          </div>
+          {isMilestonesOpen ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+        </button>
 
-      <ClosePortfolioModal
-        isOpen={isCloseModalOpen}
-        minDateIso={latestMilestoneDateIso}
-        onConfirm={(closedAtIso) => closePortfolio(portfolio.id, closedAtIso)}
-        onClose={() => setIsCloseModalOpen(false)}
-      />
+        {isMilestonesOpen && (
+          sortedMilestones.length === 0 ? (
+            <div className="border-2 border-dashed rounded-2xl p-10 text-center animate-in fade-in">
+              <p className="text-sm text-slate-500 mb-4">Добавьте хотя бы одну точку для старта.</p>
+              <button onClick={handleOpenNewMilestone} className="inline-flex items-center gap-2 px-4 py-2 bg-sky-500 text-white font-medium text-sm rounded-xl"><CalendarPlus className="w-4 h-4" /><span>Добавить</span></button>
+            </div>
+          ) : (
+            <div className="space-y-3 animate-in fade-in slide-in-from-top-2">
+              {sortedMilestones.map((milestone, idx) => (
+                <MilestoneItem
+                  key={milestone.id}
+                  milestone={milestone}
+                  idx={idx}
+                  totalLength={portfolio.milestones.length}
+                  calcMs={result?.calculatedMilestones.find(m => m.milestoneId === milestone.id)}
+                  settings={settings}
+                  handleDuplicate={(m) => { setEditingMilestone({ id: `new_${Date.now()}`, date: m.date, assets: m.assets.map(a => ({...a})) }); setIsEditorOpen(true); }}
+                  handleEdit={(m) => { setEditingMilestone(m); setIsEditorOpen(true); }}
+                  handleDelete={(id) => deleteMilestone(portfolio.id, id)}
+                />
+              ))}
+            </div>
+          )
+        )}
+      </div>
+
+      <MilestoneEditorModal isOpen={isEditorOpen} initialMilestone={editingMilestone} onSave={handleSaveMilestone} onClose={() => setIsEditorOpen(false)} />
+      <ClosePortfolioModal isOpen={isCloseModalOpen} minDateIso={latestMilestoneDateIso} onConfirm={(iso) => closePortfolio(portfolio.id, iso)} onClose={() => setIsCloseModalOpen(false)} />
     </div>
   );
 };
 
 ===
 
-FILE 14/50
+FILE 14/51
 PATH: stock-analyzer/src/components/SettingsView.tsx
 ---
 import React, { useState, useEffect, useRef } from 'react';
@@ -9106,7 +8981,7 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { marketDb } from '../db/marketDb';
 import { FilePortabilityService } from '../services/storage/filePortability';
 import { DEFAULT_TICKER_RENAMES, DEFAULT_STOCK_SPLITS } from '../engine/TickerResolver';
-import { IExportData } from '../types/domain';
+import { IExportData, ScreenOrientation } from '../types/domain';
 import { ManualDividendsModal } from './modals/ManualDividendsModal';
 
 import { 
@@ -9121,7 +8996,8 @@ import {
   RefreshCw,
   HardDrive,
   Coins,
-  Scissors
+  Scissors,
+  Smartphone
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -9139,15 +9015,13 @@ export const SettingsView: React.FC = () => {
 
   const [cacheStats, setCacheStats] = useState({ pricesCount: 0, dividendsCount: 0 });
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
   const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Поля смены тикера
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [changeDate, setChangeDate] = useState('');
 
-  // Поля сплита
   const [splitTicker, setSplitTicker] = useState('');
   const [splitDate, setSplitDate] = useState('');
   const [splitCoef, setSplitCoef] = useState('');
@@ -9159,8 +9033,9 @@ export const SettingsView: React.FC = () => {
     setCacheStats(stats);
   };
 
-  useEffect(() => {
-    loadStats();
+  useEffect(() => { 
+    loadStats(); 
+    setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   }, []);
 
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -9168,17 +9043,33 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // ФИКСАЦИЯ ОРИЕНТАЦИИ СТРОГО ВНУТРИ ПОЛЬЗОВАТЕЛЬСКОГО ТАПА
+  const handleSetOrientation = async (mode: ScreenOrientation) => {
+    updateSettings({ orientation: mode });
+
+    if (screen.orientation && 'lock' in screen.orientation) {
+      try {
+        if (mode === 'portrait') {
+          await (screen.orientation as any).lock('portrait-primary');
+          showToast('success', 'Ориентация зафиксирована: Вертикально');
+        } else if (mode === 'landscape') {
+          await (screen.orientation as any).lock('landscape-primary');
+          showToast('success', 'Ориентация зафиксирована: Горизонтально');
+        } else {
+          screen.orientation.unlock();
+          showToast('success', 'Ориентация: Автоматически');
+        }
+      } catch (err) {
+        console.warn('Screen orientation lock failed (requires PWA mode):', err);
+      }
+    }
+  };
+
   const handleExport = async () => {
     const exportPayload: IExportData = {
-      schemaVersion: 1,
-      exportedAt: new Date().toISOString(),
-      settings,
-      groups,
-      portfolios,
+      schemaVersion: 1, exportedAt: new Date().toISOString(), settings, groups, portfolios,
     };
-
-    const success = await FilePortabilityService.exportData(exportPayload);
-    if (success) {
+    if (await FilePortabilityService.exportData(exportPayload)) {
       showToast('success', 'Файл резервной копии сохранен!');
     }
   };
@@ -9186,19 +9077,17 @@ export const SettingsView: React.FC = () => {
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
         const content = event.target?.result as string;
         const importedData = FilePortabilityService.parseImportFile(content);
-        
-        if (window.confirm(`Вы уверены, что хотите восстановить данные? Текущие портфели будут заменены (Портфелей в файле: ${importedData.portfolios.length} шт.)`)) {
+        if (window.confirm(`Восстановить данные? (Портфелей: ${importedData.portfolios.length} шт.)`)) {
           restoreFullData(importedData);
-          showToast('success', 'Данные успешно восстановлены из файла!');
+          showToast('success', 'Данные успешно восстановлены!');
         }
       } catch (err: any) {
-        showToast('error', `Ошибка импорта: ${err.message}`);
+        showToast('error', `Ошибка: ${err.message}`);
       }
     };
     reader.readAsText(file);
@@ -9208,386 +9097,159 @@ export const SettingsView: React.FC = () => {
   const handleAddRename = (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldTicker || !newTicker || !changeDate) return;
-
-    addCustomTickerRename({
-      oldTicker: oldTicker.trim().toUpperCase(),
-      newTicker: newTicker.trim().toUpperCase(),
-      changeDate: `${changeDate}T00:00:00.000Z`,
-    });
-
-    setOldTicker('');
-    setNewTicker('');
-    setChangeDate('');
-    showToast('success', 'Правило переименования тикера добавлено');
+    addCustomTickerRename({ oldTicker: oldTicker.trim().toUpperCase(), newTicker: newTicker.trim().toUpperCase(), changeDate: `${changeDate}T00:00:00.000Z` });
+    setOldTicker(''); setNewTicker(''); setChangeDate('');
+    showToast('success', 'Правило переименования добавлено');
   };
 
   const handleAddSplit = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedCoef = parseFloat(splitCoef);
     if (!splitTicker || !splitDate || isNaN(parsedCoef) || parsedCoef <= 0) return;
-
-    addCustomSplit({
-      ticker: splitTicker.trim().toUpperCase(),
-      date: `${splitDate}T00:00:00.000Z`,
-      coefficient: parsedCoef,
-    });
-
-    setSplitTicker('');
-    setSplitDate('');
-    setSplitCoef('');
-    showToast('success', 'Правило сплита акции добавлено');
+    addCustomSplit({ ticker: splitTicker.trim().toUpperCase(), date: `${splitDate}T00:00:00.000Z`, coefficient: parsedCoef });
+    setSplitTicker(''); setSplitDate(''); setSplitCoef('');
+    showToast('success', 'Правило сплита добавлено');
   };
 
   const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
-    if (!window.confirm('Очистить выбранный рыночный кэш? (Ваши портфели останутся в сохранности)')) return;
-
+    if (!window.confirm('Очистить выбранный рыночный кэш?')) return;
     switch (type) {
-      case 'STOCKS':
-        await marketDb.clearStockPricesOnly();
-        break;
-      case 'FUNDS':
-        await marketDb.clearFundPricesOnly();
-        break;
-      case 'INDICES':
-        await marketDb.clearIndicesOnly();
-        break;
-      case 'DIVIDENDS':
-        await marketDb.clearDividendsOnly();
-        break;
-      case 'ALL':
-        await marketDb.clearAllCache();
-        break;
+      case 'STOCKS': await marketDb.clearStockPricesOnly(); break;
+      case 'FUNDS': await marketDb.clearFundPricesOnly(); break;
+      case 'INDICES': await marketDb.clearIndicesOnly(); break;
+      case 'DIVIDENDS': await marketDb.clearDividendsOnly(); break;
+      case 'ALL': await marketDb.clearAllCache(); break;
     }
-
     await loadStats();
-    showToast('success', 'Выбранный кэш очищен. При просмотре портфелей котировки скачаются заново.');
+    usePortfolioStore.getState().clearCalculationCache();
+    showToast('success', 'Кэш очищен. Данные скачаются заново.');
   };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      
       {notification && (
-        <div className={`p-4 rounded-xl border text-sm font-medium flex items-center gap-2 animate-in fade-in ${
-          notification.type === 'success'
-            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-            : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-        }`}>
+        <div className={`p-4 rounded-xl border text-sm font-medium flex items-center gap-2 animate-in fade-in ${notification.type === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'}`}>
           {notification.type === 'success' ? <Check className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           <span>{notification.message}</span>
         </div>
       )}
 
-      {/* 1. РУЧНОЙ ВВОД ДИВИДЕНДОВ */}
+      {/* 1. РУЧНЫЕ ДИВИДЕНДЫ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
-              <Coins className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg">Ручной ввод дивидендов</h3>
-              <p className="text-xs text-slate-400">Добавьте дивиденды вручную, если Мосбиржа задерживает их публикацию</p>
-            </div>
+            <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl"><Coins className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Ручной ввод дивидендов</h3><p className="text-xs text-slate-400">Добавьте если MOEX задерживает публикацию</p></div>
           </div>
-
-          <button
-            onClick={() => setIsManualDivsOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-xl shadow-sm transition-all"
-          >
-            <Coins className="w-4 h-4" />
-            <span>Управление дивидендами</span>
-          </button>
+          <button onClick={() => setIsManualDivsOpen(true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-xl shadow-sm transition-all">Управление</button>
         </div>
       </div>
 
-      {/* 2. ИМПОРТ И ЭКСПОРТ JSON */}
+      {/* 2. ИМПОРТ / ЭКСПОРТ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-          <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
-            <HardDrive className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg">Импорт и Экспорт данных (Бэкап)</h3>
-            <p className="text-xs text-slate-400">Сохраняйте стратегии в файл JSON для передачи между устройствами</p>
-          </div>
+          <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl"><HardDrive className="w-5 h-5" /></div>
+          <div><h3 className="font-bold text-lg">Импорт и Экспорт данных (Бэкап)</h3><p className="text-xs text-slate-400">Сохраняйте стратегии в файл JSON для передачи между устройствами</p></div>
         </div>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-          <button
-            onClick={handleExport}
-            className="flex items-center justify-center gap-2 p-4 bg-sky-500 hover:bg-sky-600 text-white font-medium text-sm rounded-xl shadow-sm transition-all"
-          >
-            <Download className="w-5 h-5" />
-            <span>Скачать бэкап (.json)</span>
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center gap-2 p-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"
-          >
-            <Upload className="w-5 h-5 text-indigo-500" />
-            <span>Загрузить из файла (.json)</span>
-          </button>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".json"
-            onChange={handleImportFile}
-            className="hidden"
-          />
+          <button onClick={handleExport} className="flex justify-center gap-2 p-4 bg-sky-500 hover:bg-sky-600 text-white text-sm font-medium rounded-xl shadow-sm transition-all"><Download className="w-5 h-5" />Скачать бэкап (.json)</button>
+          <button onClick={() => fileInputRef.current?.click()} className="flex justify-center gap-2 p-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"><Upload className="w-5 h-5 text-indigo-500" />Загрузить из файла (.json)</button>
+          <input type="file" ref={fileInputRef} accept=".json" onChange={handleImportFile} className="hidden" />
         </div>
       </div>
 
       {/* 3. ГЛОБАЛЬНЫЕ НАСТРОЙКИ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-6 shadow-sm">
         <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-          <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
-            <Sliders className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg">Глобальные настройки расчетов</h3>
-            <p className="text-xs text-slate-400">Правила, применяемые ко всем портфелям</p>
-          </div>
+          <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl"><Sliders className="w-5 h-5" /></div>
+          <div><h3 className="font-bold text-lg">Глобальные настройки расчетов</h3><p className="text-xs text-slate-400">Правила, применяемые ко всем портфелям</p></div>
         </div>
 
-        {/* Налог на дивиденды с поддержкой 0% */}
         <div className="space-y-2 max-w-xs">
-          <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">
-            Ставка налога на дивиденды (%):
-          </label>
+          <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">Ставка налога на дивиденды (%):</label>
           <div className="flex items-center gap-2">
-            <input
-              type="number"
-              step="1"
-              min="0"
-              max="100"
-              value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate}
-              onChange={e => {
-                const val = e.target.value;
-                if (val === '') {
-                  updateSettings({ dividendTaxRate: 0 });
-                } else {
-                  const parsed = parseFloat(val);
-                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
-                    updateSettings({ dividendTaxRate: parsed });
-                  }
-                }
-              }}
-              onBlur={e => {
-                const parsed = parseFloat(e.target.value);
-                if (isNaN(parsed)) {
-                  updateSettings({ dividendTaxRate: 0 });
-                }
-              }}
-              className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono font-bold w-28 focus:ring-2 focus:ring-sky-500 focus:outline-none"
-            />
+            <input type="number" step="1" min="0" max="100" value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate} onChange={e => { const val = e.target.value; if (val === '') updateSettings({ dividendTaxRate: 0 }); else { const p = parseFloat(val); if (!isNaN(p) && p >= 0 && p <= 100) updateSettings({ dividendTaxRate: p }); } }} onBlur={e => { if (isNaN(parseFloat(e.target.value))) updateSettings({ dividendTaxRate: 0 }); }} className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-sm font-mono font-bold w-28 focus:ring-2 focus:ring-sky-500" />
             <span className="text-xs text-slate-400">% (по умолчанию 15%)</span>
           </div>
         </div>
 
-        {/* Менеджер смены тикеров */}
-        <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-sm">Машина времени тикеров (Corporate Actions)</h4>
-              <p className="text-xs text-slate-400">Правила переименования акций на Мосбирже</p>
-            </div>
-          </div>
-
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 space-y-4">
+          <div><h4 className="font-semibold text-sm">Переименования тикеров (Corporate Actions)</h4><p className="text-xs text-slate-400">Правила смены тикеров на Мосбирже</p></div>
           <form onSubmit={handleAddRename} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
-            <input
-              type="text"
-              required
-              placeholder="Старый (TCSG)"
-              value={oldTicker}
-              onChange={e => setOldTicker(e.target.value.toUpperCase())}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
-            />
-            <input
-              type="text"
-              required
-              placeholder="Новый (T)"
-              value={newTicker}
-              onChange={e => setNewTicker(e.target.value.toUpperCase())}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
-            />
-            <input
-              type="date"
-              required
-              value={changeDate}
-              onChange={e => setChangeDate(e.target.value)}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
-            />
-            <button
-              type="submit"
-              className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Добавить</span>
-            </button>
+            <input type="text" required placeholder="Старый (TCSG)" value={oldTicker} onChange={e => setOldTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
+            <input type="text" required placeholder="Новый (T)" value={newTicker} onChange={e => setNewTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
+            <input type="date" required value={changeDate} onChange={e => setChangeDate(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
+            <button type="submit" className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"><Plus className="w-3.5 h-3.5" /><span>Добавить</span></button>
           </form>
-
           <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs font-mono pr-1">
-            {(settings.tickerRenames || []).map(rule => (
-              <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 rounded-lg">
-                <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
-                <button onClick={() => removeCustomTickerRename(rule.oldTicker)} className="text-rose-500 hover:text-rose-600">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-
-            {DEFAULT_TICKER_RENAMES.map(rule => (
-              <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500">
-                <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
-                <span className="text-[10px] text-slate-400 italic">Системное</span>
-              </div>
-            ))}
+            {(settings.tickerRenames || []).map(rule => (<div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 rounded-lg"><span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span><button onClick={() => removeCustomTickerRename(rule.oldTicker)} className="text-rose-500 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button></div>))}
+            {DEFAULT_TICKER_RENAMES.map(rule => (<div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500"><span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span><span className="text-[10px] text-slate-400 italic">Системное</span></div>))}
           </div>
         </div>
 
-        {/* НОВОЕ: Менеджер сплитов (Splits) */}
-        <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-sm flex items-center gap-1.5">
-                <Scissors className="w-4 h-4 text-amber-500" />
-                <span>Дробление и консолидация акций (Сплиты)</span>
-              </h4>
-              <p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые (Сплит 1 к 100 = 100. Консолидация = 0.0002)</p>
-            </div>
-          </div>
-
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 space-y-4">
+          <div><h4 className="font-semibold text-sm flex items-center gap-1.5"><Scissors className="w-4 h-4 text-amber-500" /><span>Сплиты и консолидации акций</span></h4><p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые</p></div>
           <form onSubmit={handleAddSplit} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
-            <input
-              type="text"
-              required
-              placeholder="Тикер (TRNFP)"
-              value={splitTicker}
-              onChange={e => setSplitTicker(e.target.value.toUpperCase())}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
-            />
-            <input
-              type="date"
-              required
-              value={splitDate}
-              onChange={e => setSplitDate(e.target.value)}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
-            />
-            <input
-              type="number"
-              step="0.0001"
-              required
-              placeholder="Коэфф (100)"
-              value={splitCoef}
-              onChange={e => setSplitCoef(e.target.value)}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
-            />
-            <button
-              type="submit"
-              className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Добавить</span>
-            </button>
+            <input type="text" required placeholder="Тикер (TRNFP)" value={splitTicker} onChange={e => setSplitTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
+            <input type="date" required value={splitDate} onChange={e => setSplitDate(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
+            <input type="number" step="0.0001" required placeholder="Коэфф (100)" value={splitCoef} onChange={e => setSplitCoef(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
+            <button type="submit" className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"><Plus className="w-3.5 h-3.5" /><span>Добавить</span></button>
           </form>
-
           <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs font-mono pr-1">
-            {(settings.stockSplits || []).map(split => (
-              <div key={split.ticker} className="flex items-center justify-between p-2 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                <span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span>
-                <button onClick={() => removeCustomSplit(split.ticker)} className="text-rose-500 hover:text-rose-600">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-
-            {DEFAULT_STOCK_SPLITS.map(split => (
-              <div key={split.ticker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500">
-                <span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span>
-                <span className="text-[10px] text-slate-400 italic">Системное</span>
-              </div>
-            ))}
+            {(settings.stockSplits || []).map(split => (<div key={split.ticker} className="flex items-center justify-between p-2 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-lg"><span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span><button onClick={() => removeCustomSplit(split.ticker)} className="text-rose-500 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button></div>))}
+            {DEFAULT_STOCK_SPLITS.map(split => (<div key={split.ticker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500"><span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span><span className="text-[10px] text-slate-400 italic">Системное</span></div>))}
           </div>
         </div>
-
       </div>
 
       {/* 4. РЫНОЧНЫЙ КЭШ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg">Рыночный кэш (IndexedDB)</h3>
-              <p className="text-xs text-slate-400">Сохраненные котировки и дивиденды Мосбиржи</p>
-            </div>
+            <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl"><Database className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Рыночный кэш (IndexedDB)</h3><p className="text-xs text-slate-400">Сохраненные котировки и дивиденды Мосбиржи</p></div>
           </div>
-
-          <div className="text-xs font-mono text-slate-500">
-            Цен: <strong className="text-sky-500">{cacheStats.pricesCount}</strong> | Дивидендов: <strong className="text-emerald-500">{cacheStats.dividendsCount}</strong>
-          </div>
+          <div className="text-xs font-mono text-slate-500">Цен: <strong className="text-sky-500">{cacheStats.pricesCount}</strong> | Дивидендов: <strong className="text-emerald-500">{cacheStats.dividendsCount}</strong></div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2">
-          <button
-            onClick={() => handleClearCache('STOCKS')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>Цены акций</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('FUNDS')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>Цены фондов (LQDT)</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('INDICES')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>Значения MCFTR</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('DIVIDENDS')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>История дивидендов</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('ALL')}
-            className="p-2.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-bold rounded-xl text-left border border-rose-500/20 transition-all flex items-center justify-between col-span-1 sm:col-span-2 lg:col-span-1"
-          >
-            <span>Очистить весь кэш</span>
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          <button onClick={() => handleClearCache('STOCKS')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>Цены акций</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('FUNDS')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>Цены фондов (LQDT)</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('INDICES')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>Значения MCFTR</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('DIVIDENDS')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>История дивидендов</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('ALL')} className="p-2.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-bold rounded-xl text-left border border-rose-500/20 transition-all flex items-center justify-between col-span-1 sm:col-span-2 lg:col-span-1"><span>Очистить весь кэш</span><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
-      {/* МОДАЛКА РУЧНЫХ ДИВИДЕНДОВ */}
-      <ManualDividendsModal
-        isOpen={isManualDivsOpen}
-        onClose={() => setIsManualDivsOpen(false)}
-      />
+      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА (ПРИВЯЗКА К ПОЛЬЗОВАТЕЛЬСКОМУ ТАПУ) */}
+      {isMobile && (
+        <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
+          <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+            <div className="p-2 bg-teal-500/10 text-teal-500 rounded-xl"><Smartphone className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Фиксация положения смартфона</p></div>
+          </div>
+          <div className="flex gap-2 pt-2">
+            {(['auto', 'portrait', 'landscape'] as ScreenOrientation[]).map(mode => (
+              <button 
+                key={mode} 
+                onClick={() => handleSetOrientation(mode)} 
+                className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+              >
+                {mode === 'auto' ? 'Авто' : mode === 'portrait' ? 'Вертикально' : 'Горизонтально'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
+      <ManualDividendsModal isOpen={isManualDivsOpen} onClose={() => setIsManualDivsOpen(false)} />
     </div>
   );
 };
 
 ===
 
-FILE 15/50
+FILE 15/51
 PATH: stock-analyzer/src/components/analytics/MonthlyReturnsMatrix.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -9762,7 +9424,7 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
 
 ===
 
-FILE 16/50
+FILE 16/51
 PATH: stock-analyzer/src/components/analytics/PortfolioChart.tsx
 ---
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -10082,7 +9744,7 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
 
 ===
 
-FILE 17/50
+FILE 17/51
 PATH: stock-analyzer/src/components/common/ErrorBoundary.tsx
 ---
 import { Component, ErrorInfo, ReactNode } from 'react';
@@ -10154,7 +9816,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
 ===
 
-FILE 18/50
+FILE 18/51
 PATH: stock-analyzer/src/components/common/PwaInstallPrompt.tsx
 ---
 import React, { useState } from 'react';
@@ -10201,7 +9863,7 @@ export const PwaInstallPrompt: React.FC = () => {
 
 ===
 
-FILE 19/50
+FILE 19/51
 PATH: stock-analyzer/src/components/milestones/MilestoneEditorModal.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -10500,7 +10162,7 @@ export const MilestoneEditorModal: React.FC<Props> = ({
 
 ===
 
-FILE 20/50
+FILE 20/51
 PATH: stock-analyzer/src/components/modals/ChangeGroupModal.tsx
 ---
 import React from 'react';
@@ -10605,7 +10267,7 @@ export const ChangeGroupModal: React.FC<Props> = ({
 
 ===
 
-FILE 21/50
+FILE 21/51
 PATH: stock-analyzer/src/components/modals/ClosePortfolioModal.tsx
 ---
 import React, { useState } from 'react';
@@ -10696,7 +10358,7 @@ export const ClosePortfolioModal: React.FC<Props> = ({ isOpen, minDateIso, onCon
 
 ===
 
-FILE 22/50
+FILE 22/51
 PATH: stock-analyzer/src/components/modals/ConfirmDeleteModal.tsx
 ---
 import React from 'react';
@@ -10755,7 +10417,7 @@ export const ConfirmDeleteModal: React.FC<Props> = ({ isOpen, portfolioName, onC
 
 ===
 
-FILE 23/50
+FILE 23/51
 PATH: stock-analyzer/src/components/modals/CreateGroupModal.tsx
 ---
 import React, { useState } from 'react';
@@ -10834,7 +10496,7 @@ export const CreateGroupModal: React.FC<Props> = ({ isOpen, onSave, onClose }) =
 
 ===
 
-FILE 24/50
+FILE 24/51
 PATH: stock-analyzer/src/components/modals/CreatePortfolioModal.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -10925,7 +10587,7 @@ export const CreatePortfolioModal: React.FC<Props> = ({
 
 ===
 
-FILE 25/50
+FILE 25/51
 PATH: stock-analyzer/src/components/modals/ManualDividendsModal.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -10933,7 +10595,8 @@ import { IDividendHistory } from '../../types/domain';
 import { marketDb } from '../../db/marketDb';
 import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
-import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X } from 'lucide-react';
+import { SmartLabGateway } from '../../services/api/SmartLabGateway';
+import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X, Globe, Loader2 } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -10951,6 +10614,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [editingKey, setEditingKey] = useState<[string, string] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSmartLabLoading, setIsSmartLabLoading] = useState(false);
 
   const loadManualList = async () => {
     const list = await marketDb.getAllManualDividends();
@@ -11011,6 +10675,41 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     loadFromStorage();
   };
 
+  const handleFetchSmartLab = async () => {
+    setIsSmartLabLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const currentYear = new Date().getFullYear();
+    const prevYear = currentYear - 1;
+
+    try {
+      const [divsCurrent, divsPrev] = await Promise.all([
+        SmartLabGateway.fetchSmartLabDividends(currentYear),
+        SmartLabGateway.fetchSmartLabDividends(prevYear),
+      ]);
+
+      const allSmartLab = [...divsCurrent, ...divsPrev];
+
+      if (allSmartLab.length === 0) {
+        setErrorMessage('Не удалось загрузить данные со Smart-Lab');
+        setIsSmartLabLoading(false);
+        return;
+      }
+
+      const res = await marketDb.processSmartLabDividends(allSmartLab);
+
+      setSuccessMessage(`Smart-Lab (${prevYear}-${currentYear}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}`);
+      await loadManualList();
+      clearCalculationCache();
+      loadFromStorage();
+    } catch (err: any) {
+      setErrorMessage(`Ошибка загрузки со Smart-Lab: ${err.message}`);
+    } finally {
+      setIsSmartLabLoading(false);
+    }
+  };
+
   const handleEdit = (div: IDividendHistory) => {
     setEditingKey([div.ticker, div.date]);
     setTicker(div.ticker);
@@ -11044,6 +10743,32 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* КНОПКА ЗАГРУЗКИ СО SMART-LAB */}
+        <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <Globe className="w-4 h-4 text-sky-500" />
+            <span>Импорт дивидендов со Smart-Lab</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleFetchSmartLab}
+            disabled={isSmartLabLoading}
+            className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+          >
+            {isSmartLabLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Загрузка...</span>
+              </>
+            ) : (
+              <>
+                <Globe className="w-3.5 h-3.5" />
+                <span>Загрузить данные со Smart-Lab</span>
+              </>
+            )}
           </button>
         </div>
 
@@ -11146,7 +10871,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
           {manualList.length === 0 ? (
             <div className="text-center py-8 text-xs text-slate-400 border border-dashed rounded-xl">
-              Ручных записей пока нет. При обновлении данных Мосбиржи они добавятся автоматически.
+              Ручных записей пока нет. Воспользуйтесь кнопкой загрузки со Smart-Lab выше.
             </div>
           ) : (
             <div className="space-y-1.5 font-mono text-xs">
@@ -11179,7 +10904,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
 ===
 
-FILE 26/50
+FILE 26/51
 PATH: stock-analyzer/src/constants/config.ts
 ---
 export const APP_CONFIG = {
@@ -11196,7 +10921,7 @@ export const APP_CONFIG = {
 
 ===
 
-FILE 27/50
+FILE 27/51
 PATH: stock-analyzer/src/constants/defaultStocks.ts
 ---
 import { AssetType } from '../types/domain';
@@ -11228,7 +10953,7 @@ export const POPULAR_MOEX_ASSETS: IPopularAsset[] = [
 
 ===
 
-FILE 28/50
+FILE 28/51
 PATH: stock-analyzer/src/context/ThemeContext.tsx
 ---
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -11278,7 +11003,7 @@ export const useTheme = () => {
 
 ===
 
-FILE 29/50
+FILE 29/51
 PATH: stock-analyzer/src/db/marketDb.ts
 ---
 import Dexie, { Table } from 'dexie';
@@ -11289,9 +11014,6 @@ interface ICacheMeta {
   lastUpdatedMs: number;
 }
 
-// Список известных фондов ликвидности для безопасной очистки
-const KNOWN_FUNDS = ['LQDT', 'SBMM', 'AKMM', 'TRUR'];
-
 export class MarketDatabase extends Dexie {
   prices!: Table<IPriceHistory, [string, string]>;
   dividends!: Table<IDividendHistory, [string, string]>;
@@ -11300,8 +11022,8 @@ export class MarketDatabase extends Dexie {
   constructor() {
     super('MarketCacheDB');
 
-    this.version(2).stores({
-      prices: '[ticker+date], ticker, date',
+    this.version(3).stores({
+      prices: '[ticker+date], ticker, date, type',
       dividends: '[ticker+date], ticker, date, isManual',
       meta: 'key',
     });
@@ -11324,6 +11046,54 @@ export class MarketDatabase extends Dexie {
 
     const existing = await this.dividends.where('ticker').equals(cleanTicker).toArray();
     return existing.some(div => Math.abs(new Date(div.date).getTime() - targetTime) <= windowMs);
+  }
+
+  async processSmartLabDividends(smartLabDividends: IDividendHistory[]): Promise<{ added: number; updated: number; skipped: number }> {
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    const windowMs = 30 * 24 * 60 * 60 * 1000;
+
+    for (const item of smartLabDividends) {
+      const cleanTicker = item.ticker.trim().toUpperCase();
+      const targetTime = new Date(item.date).getTime();
+
+      const existing = await this.dividends.where('ticker').equals(cleanTicker).toArray();
+
+      const hasOfficial = existing.some(d => !d.isManual && Math.abs(new Date(d.date).getTime() - targetTime) <= windowMs);
+      if (hasOfficial) {
+        skipped++;
+        continue;
+      }
+
+      const existingManual = existing.find(d => d.isManual && Math.abs(new Date(d.date).getTime() - targetTime) <= windowMs);
+
+      if (existingManual) {
+        if (existingManual.date === item.date && existingManual.value === item.value) {
+          skipped++;
+          continue;
+        }
+
+        await this.dividends.delete([existingManual.ticker, existingManual.date]);
+        await this.dividends.put({
+          ticker: cleanTicker,
+          date: item.date,
+          value: item.value,
+          isManual: true,
+        });
+        updated++;
+      } else {
+        await this.dividends.put({
+          ticker: cleanTicker,
+          date: item.date,
+          value: item.value,
+          isManual: true,
+        });
+        added++;
+      }
+    }
+
+    return { added, updated, skipped };
   }
 
   async reconcileAndSaveMoexDividends(ticker: string, moexDividends: IDividendHistory[]) {
@@ -11360,19 +11130,19 @@ export class MarketDatabase extends Dexie {
     return await this.dividends.filter(d => !!d.isManual).toArray();
   }
 
-  // Очистка ТОЛЬКО акций (Исключая MCFTR и фонды)
   async clearStockPricesOnly() {
-    await this.prices.filter(p => p.ticker !== 'MCFTR' && !KNOWN_FUNDS.includes(p.ticker)).delete();
-    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !KNOWN_FUNDS.some(f => m.key.includes(f))).delete();
+    await this.prices.filter(p => p.type === 'STOCK').delete();
+    const fundsAndIndexMetas = await this.prices.filter(p => p.type === 'FUND' || p.type === 'INDEX').toArray();
+    const keepKeys = fundsAndIndexMetas.map(p => `PRICE_${p.ticker}_${p.date}`);
+    await this.meta.filter(m => m.key.startsWith('PRICE_') && !keepKeys.includes(m.key)).delete();
   }
   
-  // ИСПРАВЛЕНИЕ: Очистка ВСЕХ фондов ликвидности
   async clearFundPricesOnly() {
-    await this.prices.filter(p => KNOWN_FUNDS.includes(p.ticker)).delete();
+    await this.prices.filter(p => p.type === 'FUND').delete();
   }
   
   async clearIndicesOnly() {
-    await this.prices.where('ticker').equals('MCFTR').delete();
+    await this.prices.filter(p => p.type === 'INDEX').delete();
   }
   
   async clearDividendsOnly() {
@@ -11395,7 +11165,7 @@ export const marketDb = new MarketDatabase();
 
 ===
 
-FILE 30/50
+FILE 30/51
 PATH: stock-analyzer/src/engine/CalendarAdjuster.ts
 ---
 export class CalendarAdjuster {
@@ -11412,7 +11182,7 @@ export class CalendarAdjuster {
 
 ===
 
-FILE 31/50
+FILE 31/51
 PATH: stock-analyzer/src/engine/DateTimeStandardizer.ts
 ---
 export class DateTimeStandardizer {
@@ -11463,7 +11233,7 @@ export class DateTimeStandardizer {
 
 ===
 
-FILE 32/50
+FILE 32/51
 PATH: stock-analyzer/src/engine/FinancialMath.ts
 ---
 export class FinancialMath {
@@ -11527,7 +11297,7 @@ export class FinancialMath {
 
 ===
 
-FILE 33/50
+FILE 33/51
 PATH: stock-analyzer/src/engine/TickerResolver.ts
 ---
 import { ITickerRename, IStockSplit } from '../types/domain';
@@ -11628,7 +11398,7 @@ export class TickerResolver {
 
 ===
 
-FILE 34/50
+FILE 34/51
 PATH: stock-analyzer/src/hooks/useNetworkStatus.ts
 ---
 import { useState, useEffect } from 'react';
@@ -11654,7 +11424,7 @@ export function useNetworkStatus() {
 
 ===
 
-FILE 35/50
+FILE 35/51
 PATH: stock-analyzer/src/hooks/usePortfolioCalculation.ts
 ---
 import { useState, useEffect } from 'react';
@@ -11665,11 +11435,11 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 export function usePortfolioCalculation(portfolio: IPortfolio) {
   const { settings, calculationsCache, setCalculationCache } = usePortfolioStore();
   
-  const currentHour = new Date().getHours(); // Текущий локальный час
+  // Абсолютный час в истории (миллисекунды / 3,600,000) - гарантирует сброс на следующий день!
+  const currentAbsoluteHour = Math.floor(Date.now() / 3600000);
+  
   const cachedWrapper = calculationsCache[portfolio.id];
-
-  // Проверяем валидность кэша: есть ли он, и совпадает ли час расчета с текущим
-  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentHour;
+  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentAbsoluteHour;
   
   const cachedResult: ICalculatedPortfolio | null = isCacheValid ? cachedWrapper.result : null;
   const [loading, setLoading] = useState<boolean>(!isCacheValid);
@@ -11686,7 +11456,7 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     PortfolioCalculationService.calculatePortfolio(portfolio, settings)
       .then(res => {
         if (isMounted) {
-          setCalculationCache(portfolio.id, res, currentHour);
+          setCalculationCache(portfolio.id, res, currentAbsoluteHour);
           setLoading(false);
         }
       })
@@ -11700,17 +11470,14 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     return () => {
       isMounted = false;
     };
-  }, [portfolio, settings, isCacheValid, currentHour, setCalculationCache]);
+  }, [portfolio, settings, isCacheValid, currentAbsoluteHour, setCalculationCache]);
 
-  return { 
-    result: cachedResult, 
-    loading 
-  };
+  return { result: cachedResult, loading };
 }
 
 ===
 
-FILE 36/50
+FILE 36/51
 PATH: stock-analyzer/src/hooks/usePwaInstall.ts
 ---
 import { useState, useEffect } from 'react';
@@ -11751,7 +11518,7 @@ export function usePwaInstall() {
 
 ===
 
-FILE 37/50
+FILE 37/51
 PATH: stock-analyzer/src/index.css
 ---
 @tailwind base;
@@ -11766,7 +11533,7 @@ PATH: stock-analyzer/src/index.css
 
 ===
 
-FILE 38/50
+FILE 38/51
 PATH: stock-analyzer/src/main.tsx
 ---
 import React from 'react';
@@ -11782,7 +11549,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 ===
 
-FILE 39/50
+FILE 39/51
 PATH: stock-analyzer/src/services/api/MoexApiGateway.ts
 ---
 import { IDividendHistory } from '../../types/domain';
@@ -11915,7 +11682,132 @@ export class MoexApiGateway {
 
 ===
 
-FILE 40/50
+FILE 40/51
+PATH: stock-analyzer/src/services/api/SmartLabGateway.ts
+---
+import { IDividendHistory } from '../../types/domain';
+
+export class SmartLabGateway {
+  static async fetchSmartLabDividends(year: number): Promise<IDividendHistory[]> {
+    const url = `https://smart-lab.ru/dividends/index?year=${year}`;
+    let htmlText = '';
+
+    try {
+      const resp = await fetch(url);
+      if (resp.ok) {
+        htmlText = await resp.text();
+      }
+    } catch {
+      // Fallback to proxy
+    }
+
+    if (!htmlText) {
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        const resp = await fetch(proxyUrl);
+        if (resp.ok) {
+          htmlText = await resp.text();
+        }
+      } catch {
+        // Fallback to secondary proxy
+      }
+    }
+
+    if (!htmlText) {
+      try {
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const resp = await fetch(proxyUrl);
+        if (resp.ok) {
+          htmlText = await resp.text();
+        }
+      } catch {
+        // Failed
+      }
+    }
+
+    if (!htmlText) return [];
+
+    return this.parseSmartLabHtml(htmlText);
+  }
+
+  private static parseSmartLabHtml(htmlText: string): IDividendHistory[] {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(htmlText, 'text/html');
+    const results: IDividendHistory[] = [];
+
+    const rows = doc.querySelectorAll('table tr');
+
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('td');
+      if (cells.length < 3) return;
+
+      let ticker = '';
+      
+      const anchors = row.querySelectorAll('a');
+      anchors.forEach(a => {
+        const href = a.getAttribute('href') || '';
+        const match = href.match(/\/(?:q|forum)\/([A-Z0-9]{1,6})\b/i);
+        if (match && !ticker) {
+          ticker = match[1].toUpperCase();
+        }
+      });
+
+      if (!ticker && cells[0]) {
+        const text = cells[0].textContent?.trim().toUpperCase() || '';
+        const match = text.match(/\b([A-Z]{1,5})\b/);
+        if (match) {
+          ticker = match[1];
+        }
+      }
+
+      if (!ticker) return;
+
+      let dateIso = '';
+      const rowText = row.textContent || '';
+      const dateMatch = rowText.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+      if (dateMatch) {
+        const [, day, month, year] = dateMatch;
+        dateIso = `${year}-${month}-${day}`;
+      } else {
+        const dateMatchShort = rowText.match(/(\d{2})\.(\d{2})\.(\d{2})\b/);
+        if (dateMatchShort) {
+          const [, day, month, yearShort] = dateMatchShort;
+          dateIso = `20${yearShort}-${month}-${day}`;
+        }
+      }
+
+      if (!dateIso) return;
+
+      let value = 0;
+      cells.forEach(cell => {
+        const cellText = cell.textContent?.trim() || '';
+        const numMatch = cellText.match(/^(\d+(?:[.,]\d+)?)\s*(?:руб|₽)?$/i) || 
+                         cellText.match(/(\d+(?:[.,]\d+)?)\s*(?:руб|₽)/i);
+        if (numMatch && !value) {
+          const parsedVal = parseFloat(numMatch[1].replace(',', '.'));
+          if (parsedVal > 0 && parsedVal < 50000) {
+            value = parsedVal;
+          }
+        }
+      });
+
+      if (ticker && dateIso && value > 0) {
+        results.push({
+          ticker,
+          date: dateIso,
+          value,
+          isManual: true,
+        });
+      }
+    });
+
+    return results;
+  }
+}
+
+===
+
+FILE 41/51
 PATH: stock-analyzer/src/services/engine/PortfolioCalculationService.ts
 ---
 import { IPortfolio, AssetType, IGlobalSettings, IAssetAllocation } from '../../types/domain';
@@ -11993,12 +11885,10 @@ export interface ICalculatedPortfolio {
   totalProfitPercent: number;
   monthlyReturnPercent: number;
   annualizedReturnPercent: number;
-  
   mcftrStartPrice: number;
   mcftrFinishPrice: number;
   mcftrTotalProfitPercent: number;
   mcftrMonthlyReturnPercent: number;
-  
   alphaMonthlyPercent: number;
   performanceColor: 'RED' | 'YELLOW' | 'GREEN';
   isLoading: boolean;
@@ -12006,6 +11896,8 @@ export interface ICalculatedPortfolio {
 }
 
 interface ISubPeriodResult {
+  startIso: string;
+  finishIso: string;
   assets: ICalculatedAsset[];
   freeCashWeight: number;
   lqdtStartPrice: number;
@@ -12019,14 +11911,10 @@ interface ISubPeriodResult {
 
 export class PortfolioCalculationService {
   
-  /**
-   * Находит все даты завершения месяцев между start и end в 12:00:00 UTC
-   */
   private static getMonthEndDatesBetween(startIso: string, endIso: string): string[] {
     const result: string[] = [];
     const start = new Date(startIso);
     const end = new Date(endIso);
-
     let current = DateTimeStandardizer.getUTCMonthEndNoShift(start.getUTCFullYear(), start.getUTCMonth());
 
     while (current.getTime() < end.getTime()) {
@@ -12038,9 +11926,6 @@ export class PortfolioCalculationService {
     return result;
   }
 
-  /**
-   * ЯДРО: Изолированный расчёт одного суб-интервала с ПАРАЛЛЕЛЬНОЙ загрузкой данных
-   */
   private static async _calculateSubPeriodReturns(
     assets: IAssetAllocation[],
     startIso: string,
@@ -12055,17 +11940,15 @@ export class PortfolioCalculationService {
     let totalAllocatedWeight = 0;
     let portfolioProfitPercent = 0;
 
-    // ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ВСЕХ АКТИВОВ ТОЧКИ
     const assetPromises = assets.map(async (asset) => {
       const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
       const startResolved = TickerResolver.resolveTicker(asset.ticker, startIso, customRenames);
       const finishResolved = TickerResolver.resolveTicker(asset.ticker, finishIso, customRenames);
       
-      const pStartRes = MarketDataSyncService.getOrFetchPrice(startResolved, startIso);
-      const pFinishRes = MarketDataSyncService.getOrFetchPrice(finishResolved, finishIso);
-      
-      // Запускаем запросы цен параллельно
-      const [pStart, pFinish] = await Promise.all([pStartRes, pFinishRes]);
+      const [pStart, pFinish] = await Promise.all([
+        MarketDataSyncService.getOrFetchPrice(startResolved, startIso, asset.type),
+        MarketDataSyncService.getOrFetchPrice(finishResolved, finishIso, asset.type)
+      ]);
 
       const startPriceRaw = pStart?.price || 0;
       const finishPriceRaw = pFinish?.price || 0;
@@ -12080,12 +11963,11 @@ export class PortfolioCalculationService {
       let netDividends = 0;
 
       if (asset.type === 'STOCK' && startPrice > 0) {
-        const divsStartRes = MarketDataSyncService.getOrFetchDividends(startResolved);
-        const divsFinishRes = startResolved !== finishResolved 
-          ? MarketDataSyncService.getOrFetchDividends(finishResolved) 
-          : Promise.resolve([]);
-        
-        const [divsStart, divsFinish] = await Promise.all([divsStartRes, divsFinishRes]);
+        const [divsStart, divsFinish] = await Promise.all([
+          MarketDataSyncService.getOrFetchDividends(startResolved),
+          startResolved !== finishResolved ? MarketDataSyncService.getOrFetchDividends(finishResolved) : Promise.resolve([])
+        ]);
+
         const allD = [...divsStart, ...divsFinish];
         const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
 
@@ -12125,23 +12007,18 @@ export class PortfolioCalculationService {
       portfolioProfitPercent += ca.profitPercent * (ca.weight / 100);
     }
 
-    // РАСЧЕТ LQDT И MCFTR ПАРАЛЛЕЛЬНО
     const freeCashWeight = Math.max(0, Math.round((100 - totalAllocatedWeight) * 100) / 100);
-    let lqdtStartPrice = 0;
-    let lqdtFinishPrice = 0;
-    let lqdtProfitPercent = 0;
+    let lqdtStartPrice = 0, lqdtFinishPrice = 0, lqdtProfitPercent = 0;
+    let mcftrStartPrice = 0, mcftrFinishPrice = 0, mcftrProfitPercent = 0;
 
-    let mcftrStartPrice = 0;
-    let mcftrFinishPrice = 0;
-    let mcftrProfitPercent = 0;
-
-    const basePromises = [];
-    basePromises.push(MarketDataSyncService.getOrFetchMCFTR(startIso));
-    basePromises.push(MarketDataSyncService.getOrFetchMCFTR(finishIso));
+    const basePromises = [
+      MarketDataSyncService.getOrFetchMCFTR(startIso),
+      MarketDataSyncService.getOrFetchMCFTR(finishIso)
+    ];
 
     if (freeCashWeight > 0) {
-      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', startIso));
-      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', finishIso));
+      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', startIso, 'FUND'));
+      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', finishIso, 'FUND'));
     }
 
     const baseResults = await Promise.all(basePromises);
@@ -12162,15 +12039,9 @@ export class PortfolioCalculationService {
     }
 
     return {
-      assets: calculatedAssets,
-      freeCashWeight,
-      lqdtStartPrice,
-      lqdtFinishPrice,
-      lqdtProfitPercent,
-      mcftrStartPrice,
-      mcftrFinishPrice,
-      mcftrProfitPercent,
-      portfolioProfitPercent
+      startIso, finishIso, assets: calculatedAssets, freeCashWeight,
+      lqdtStartPrice, lqdtFinishPrice, lqdtProfitPercent,
+      mcftrStartPrice, mcftrFinishPrice, mcftrProfitPercent, portfolioProfitPercent
     };
   }
 
@@ -12199,20 +12070,8 @@ export class PortfolioCalculationService {
       new Set([rangeStartIso, ...internalMilestoneDates, ...monthEnds, rangeFinishIso])
     ).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
-    const chartPoints: IEquityChartPoint[] = [];
-    let cumPortfolioMult = 1.0;
-    let cumMcftrMult = 1.0;
-
-    chartPoints.push({
-      dateIso: rangeStartIso,
-      dateDisplay: DateTimeStandardizer.formatToLocalDisplay(rangeStartIso).split(' ')[0],
-      timestamp: rangeStartTime,
-      type: 'START',
-      portfolioReturn: 0,
-      mcftrReturn: 0,
-      alpha: 0,
-    });
-
+    // ГОТОВИМ ЗАДАЧИ ДЛЯ ПАРАЛЛЕЛЬНОГО РАСЧЕТА
+    const subPeriodTasks = [];
     for (let i = 0; i < allTimelineDates.length - 1; i++) {
       const subStartIso = allTimelineDates[i];
       const subFinishIso = allTimelineDates[i + 1];
@@ -12223,22 +12082,38 @@ export class PortfolioCalculationService {
         if (new Date(ms.date).getTime() <= subStartTime) activeMs = ms;
         else break;
       }
+      subPeriodTasks.push(this._calculateSubPeriodReturns(activeMs.assets, subStartIso, subFinishIso, settings));
+    }
 
-      const res = await this._calculateSubPeriodReturns(activeMs.assets, subStartIso, subFinishIso, settings);
+    // ВЫПОЛНЯЕМ ВСЕ ЗАПРОСЫ ВШИРЬ (ПАРАЛЛЕЛЬНО)
+    const subPeriodResults = await Promise.all(subPeriodTasks);
 
+    const chartPoints: IEquityChartPoint[] = [];
+    let cumPortfolioMult = 1.0;
+    let cumMcftrMult = 1.0;
+
+    chartPoints.push({
+      dateIso: rangeStartIso,
+      dateDisplay: DateTimeStandardizer.formatToLocalDisplay(rangeStartIso).split(' ')[0],
+      timestamp: rangeStartTime,
+      type: 'START',
+      portfolioReturn: 0, mcftrReturn: 0, alpha: 0,
+    });
+
+    for (const res of subPeriodResults) {
       cumPortfolioMult *= (1 + res.portfolioProfitPercent / 100);
       cumMcftrMult *= (1 + res.mcftrProfitPercent / 100);
 
       const cumP = (cumPortfolioMult - 1) * 100;
       const cumM = (cumMcftrMult - 1) * 100;
 
-      const isMs = internalMilestoneDates.includes(subFinishIso);
-      const isFinish = subFinishIso === rangeFinishIso;
+      const isMs = internalMilestoneDates.includes(res.finishIso);
+      const isFinish = res.finishIso === rangeFinishIso;
 
       chartPoints.push({
-        dateIso: subFinishIso,
-        dateDisplay: DateTimeStandardizer.formatToLocalDisplay(subFinishIso).split(' ')[0],
-        timestamp: new Date(subFinishIso).getTime(),
+        dateIso: res.finishIso,
+        dateDisplay: DateTimeStandardizer.formatToLocalDisplay(res.finishIso).split(' ')[0],
+        timestamp: new Date(res.finishIso).getTime(),
         type: isFinish ? 'FINISH' : isMs ? 'MILESTONE' : 'MONTH_END',
         portfolioReturn: Number(cumP.toFixed(2)),
         mcftrReturn: Number(cumM.toFixed(2)),
@@ -12266,25 +12141,32 @@ export class PortfolioCalculationService {
     const finishDate = new Date(finishDateIso);
     const totalDays = Math.max(1, Math.round((finishDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
 
+    // ГОТОВИМ ЗАДАЧИ (ПАРАЛЛЕЛЬНАЯ ЗАГРУЗКА ТОЧЕК)
+    const milestoneTasks = [];
+    for (let i = 0; i < milestonesAsc.length; i++) {
+      const msStartIso = milestonesAsc[i].date;
+      const msFinishIso = (i + 1 < milestonesAsc.length) ? milestonesAsc[i + 1].date : finishDateIso;
+      milestoneTasks.push(this._calculateSubPeriodReturns(milestonesAsc[i].assets, msStartIso, msFinishIso, settings));
+    }
+
+    // ЗАПУСК ВШИРЬ!
+    const msResults = await Promise.all(milestoneTasks);
+
     const calculatedMilestones: ICalculatedMilestone[] = [];
     const milestoneReturns: number[] = [];
 
     for (let i = 0; i < milestonesAsc.length; i++) {
       const currentMs = milestonesAsc[i];
-      const msStartIso = currentMs.date;
-      const msFinishIso = (i + 1 < milestonesAsc.length) ? milestonesAsc[i + 1].date : finishDateIso;
+      const res = msResults[i];
 
-      const durationHours = Math.max(1, Math.round((new Date(msFinishIso).getTime() - new Date(msStartIso).getTime()) / (1000 * 60 * 60)));
-      const durationDays = Math.round(durationHours / 24);
-
-      const res = await this._calculateSubPeriodReturns(currentMs.assets, msStartIso, msFinishIso, settings);
+      const durationHours = Math.max(1, Math.round((new Date(res.finishIso).getTime() - new Date(res.startIso).getTime()) / (1000 * 60 * 60)));
 
       calculatedMilestones.push({
         milestoneId: currentMs.id,
-        startDateIso: msStartIso,
-        finishDateIso: msFinishIso,
+        startDateIso: res.startIso,
+        finishDateIso: res.finishIso,
         durationHours,
-        durationDays,
+        durationDays: Math.round(durationHours / 24),
         assets: res.assets,
         freeCashWeight: res.freeCashWeight,
         lqdtStartPrice: res.lqdtStartPrice,
@@ -12296,19 +12178,19 @@ export class PortfolioCalculationService {
         mcftrProfitPercent: res.mcftrProfitPercent,
         mcftrAlphaPercent: res.portfolioProfitPercent - res.mcftrProfitPercent,
       });
-
       milestoneReturns.push(res.portfolioProfitPercent);
     }
 
+    // График тоже считается параллельно внутри
     const chartPoints = await this.calculateChartCurveForRange(portfolio, startDateIso, finishDateIso, settings);
 
     const totalProfitPercent = FinancialMath.calculateCompoundReturn(milestoneReturns);
     const monthlyReturnPercent = FinancialMath.calculateMonthlyRate(totalProfitPercent, totalDays);
     const annualizedReturnPercent = FinancialMath.calculateAnnualizedRate(monthlyReturnPercent);
 
+    // Достаем MCFTR (он уже лежит в кэше RAM, так как запрошен выше)
     const mcftrStart = await MarketDataSyncService.getOrFetchMCFTR(startDateIso);
     const mcftrFinish = await MarketDataSyncService.getOrFetchMCFTR(finishDateIso);
-    
     let mcftrMonthlyReturnPercent = 0;
     let mcftrTotalProfitPercent = 0;
     
@@ -12324,23 +12206,11 @@ export class PortfolioCalculationService {
     else if (alphaMonthlyPercent >= 0.01) performanceColor = 'YELLOW';
 
     return {
-      portfolioId: portfolio.id,
-      startDateIso,
-      finishDateIso,
-      totalDays,
-      calculatedMilestones,
-      chartPoints,
-      totalProfitPercent,
-      monthlyReturnPercent,
-      annualizedReturnPercent,
-      mcftrStartPrice: mcftrStart?.price || 0,
-      mcftrFinishPrice: mcftrFinish?.price || 0,
-      mcftrTotalProfitPercent,
-      mcftrMonthlyReturnPercent,
-      alphaMonthlyPercent,
-      performanceColor,
-      isLoading: false,
-      error: null,
+      portfolioId: portfolio.id, startDateIso, finishDateIso, totalDays, calculatedMilestones, chartPoints,
+      totalProfitPercent, monthlyReturnPercent, annualizedReturnPercent,
+      mcftrStartPrice: mcftrStart?.price || 0, mcftrFinishPrice: mcftrFinish?.price || 0,
+      mcftrTotalProfitPercent, mcftrMonthlyReturnPercent, alphaMonthlyPercent, performanceColor,
+      isLoading: false, error: null,
     };
   }
 
@@ -12354,29 +12224,22 @@ export class PortfolioCalculationService {
     const startDateIso = milestonesAsc[0].date;
     const nowIso = DateTimeStandardizer.toUTCISOString(new Date());
     const finishDateIso = portfolio.closedAt || nowIso;
-
     const startDate = new Date(startDateIso);
     const finishDate = new Date(finishDateIso);
     const startYear = startDate.getUTCFullYear();
     const finishYear = finishDate.getUTCFullYear();
     const monthNames = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
-    const rows: IMonthlyMatrixRow[] = [];
+    
+    // ПАРАЛЛЕЛЬНАЯ СБОРКА ВСЕХ ЯЧЕЕК МАТРИЦЫ!
+    const allCellTasks: { y: number, m: number, promise: Promise<ISubPeriodResult | null>, isPartial: boolean, start: Date, finish: Date }[] = [];
 
     for (let yr = finishYear; yr >= startYear; yr--) {
-      const cells: IMonthlyMatrixCell[] = [];
-      const yearPortfolioReturns: number[] = [];
-      const yearMcftrReturns: number[] = [];
-
       for (let m = 0; m < 12; m++) {
-        // Концы месяцев строим через полдень UTC
         const firstDayOfMonth = DateTimeStandardizer.getUTCMonthEndNoShift(yr, m - 1);
         const lastDayOfMonth = DateTimeStandardizer.getUTCMonthEndNoShift(yr, m);
 
         if (lastDayOfMonth.getTime() < startDate.getTime() || firstDayOfMonth.getTime() > finishDate.getTime()) {
-          cells.push({
-            monthIndex: m, monthName: monthNames[m], portfolioReturn: null, mcftrReturn: null,
-            alpha: null, isPartial: false, startDateDisplay: '', finishDateDisplay: '',
-          });
+          allCellTasks.push({ y: yr, m, promise: Promise.resolve(null), isPartial: false, start: firstDayOfMonth, finish: lastDayOfMonth });
           continue;
         }
 
@@ -12386,24 +12249,50 @@ export class PortfolioCalculationService {
         const calcStartIso = DateTimeStandardizer.toUTCISOString(calcStart);
         const calcFinishIso = DateTimeStandardizer.toUTCISOString(calcFinish);
 
-        const calcStartTime = calcStart.getTime();
         let activeMs = milestonesAsc[0];
         for (const ms of milestonesAsc) {
-          if (new Date(ms.date).getTime() <= calcStartTime) activeMs = ms;
+          if (new Date(ms.date).getTime() <= calcStart.getTime()) activeMs = ms;
           else break;
         }
 
-        const res = await this._calculateSubPeriodReturns(activeMs.assets, calcStartIso, calcFinishIso, settings);
+        allCellTasks.push({
+          y: yr, m, isPartial, start: calcStart, finish: calcFinish,
+          promise: this._calculateSubPeriodReturns(activeMs.assets, calcStartIso, calcFinishIso, settings)
+        });
+      }
+    }
+
+    const resolvedCells = await Promise.all(allCellTasks.map(t => t.promise));
+
+    const rows: IMonthlyMatrixRow[] = [];
+    let taskIdx = 0;
+
+    for (let yr = finishYear; yr >= startYear; yr--) {
+      const cells: IMonthlyMatrixCell[] = [];
+      const yearPortfolioReturns: number[] = [];
+      const yearMcftrReturns: number[] = [];
+
+      for (let m = 0; m < 12; m++) {
+        const task = allCellTasks[taskIdx];
+        const res = resolvedCells[taskIdx];
+        taskIdx++;
+
+        if (res === null) {
+          cells.push({
+            monthIndex: m, monthName: monthNames[m], portfolioReturn: null, mcftrReturn: null,
+            alpha: null, isPartial: false, startDateDisplay: '', finishDateDisplay: '',
+          });
+          continue;
+        }
 
         const mPortfolioRet = Number(res.portfolioProfitPercent.toFixed(2));
         const mMcftrRet = Number(res.mcftrProfitPercent.toFixed(2));
-        const mAlpha = Number((mPortfolioRet - mMcftrRet).toFixed(2));
 
         cells.push({
           monthIndex: m, monthName: monthNames[m], portfolioReturn: mPortfolioRet, mcftrReturn: mMcftrRet,
-          alpha: mAlpha, isPartial,
-          startDateDisplay: DateTimeStandardizer.formatToLocalDisplay(calcStartIso).split(' ')[0],
-          finishDateDisplay: DateTimeStandardizer.formatToLocalDisplay(calcFinishIso).split(' ')[0],
+          alpha: Number((mPortfolioRet - mMcftrRet).toFixed(2)), isPartial: task.isPartial,
+          startDateDisplay: DateTimeStandardizer.formatToLocalDisplay(DateTimeStandardizer.toUTCISOString(task.start)).split(' ')[0],
+          finishDateDisplay: DateTimeStandardizer.formatToLocalDisplay(DateTimeStandardizer.toUTCISOString(task.finish)).split(' ')[0],
         });
         yearPortfolioReturns.push(mPortfolioRet);
         yearMcftrReturns.push(mMcftrRet);
@@ -12411,13 +12300,12 @@ export class PortfolioCalculationService {
 
       const yrP = yearPortfolioReturns.length > 0 ? FinancialMath.calculateCompoundReturn(yearPortfolioReturns) : null;
       const yrM = yearMcftrReturns.length > 0 ? FinancialMath.calculateCompoundReturn(yearMcftrReturns) : null;
-      const yrA = yrP !== null && yrM !== null ? yrP - yrM : null;
 
       rows.push({
         year: yr, months: cells,
         yearPortfolioReturn: yrP !== null ? Number(yrP.toFixed(2)) : null,
         yearMcftrReturn: yrM !== null ? Number(yrM.toFixed(2)) : null,
-        yearAlpha: yrA !== null ? Number(yrA.toFixed(2)) : null,
+        yearAlpha: yrP !== null && yrM !== null ? Number((yrP - yrM).toFixed(2)) : null,
       });
     }
 
@@ -12436,7 +12324,7 @@ export class PortfolioCalculationService {
 
 ===
 
-FILE 41/50
+FILE 42/51
 PATH: stock-analyzer/src/services/storage/filePortability.ts
 ---
 import { IExportData } from '../../types/domain';
@@ -12533,7 +12421,7 @@ export class FilePortabilityService {
 
 ===
 
-FILE 42/50
+FILE 43/51
 PATH: stock-analyzer/src/services/storage/userStorage.ts
 ---
 import { IGlobalSettings, IPortfolio } from '../../types/domain';
@@ -12568,7 +12456,7 @@ export class UserStorage {
 
 ===
 
-FILE 43/50
+FILE 44/51
 PATH: stock-analyzer/src/services/sync/MarketDataSyncService.ts
 ---
 import { marketDb } from '../../db/marketDb';
@@ -12576,7 +12464,7 @@ import { MoexApiGateway } from '../api/MoexApiGateway';
 import { TickerResolver } from '../../engine/TickerResolver';
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { CalendarAdjuster } from '../../engine/CalendarAdjuster';
-import { IDividendHistory } from '../../types/domain';
+import { AssetType, IDividendHistory } from '../../types/domain';
 
 export interface ISyncPriceResult {
   ticker: string;
@@ -12586,12 +12474,10 @@ export interface ISyncPriceResult {
   source: 'INDEXED_DB' | 'MOEX_API';
 }
 
-// Оперативный кэш промисов (Анти-спам одновременных запросов)
 const requestLocks = new Map<string, Promise<any>>();
 
 export class MarketDataSyncService {
   
-  // Универсальная обертка для дедупликации одновременных асинхронных вызовов
   private static async withLock<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
     if (requestLocks.has(key)) {
       return requestLocks.get(key) as Promise<T>;
@@ -12601,15 +12487,14 @@ export class MarketDataSyncService {
     return promise;
   }
 
-  static async getOrFetchPrice(rawTicker: string, utcIsoString: string): Promise<ISyncPriceResult | null> {
+  // ДОБАВЛЕН АРГУМЕНТ assetType
+  static async getOrFetchPrice(rawTicker: string, utcIsoString: string, assetType?: AssetType | 'INDEX'): Promise<ISyncPriceResult | null> {
     const resolvedTicker = TickerResolver.resolveTicker(rawTicker, utcIsoString);
     const mskDateStr = DateTimeStandardizer.toMSKDateString(utcIsoString);
     
-    // Блокирующий ключ для RAM: "SBER_2024-01-01"
-    const lockKey = `${resolvedTicker}_${mskDateStr}`;
+    const lockKey = `PRICE_${resolvedTicker}_${mskDateStr}`;
 
     return this.withLock(lockKey, async () => {
-      // 1. Проверяем IndexedDB
       const cached = await marketDb.prices.get([resolvedTicker, mskDateStr]);
       if (cached) {
         return {
@@ -12621,15 +12506,15 @@ export class MarketDataSyncService {
         };
       }
 
-      // 2. Идем в API
       const moexRes = await MoexApiGateway.fetchClosePrice(resolvedTicker, mskDateStr);
       if (!moexRes) return null;
 
-      // 3. Сохраняем в БД (Составной ключ перезапишет дубли)
+      // СОХРАНЯЕМ ТИП В БАЗУ ДЛЯ ТОЧНОЙ ОЧИСТКИ
       await marketDb.prices.put({
         ticker: resolvedTicker,
         date: mskDateStr,
         price: moexRes.price,
+        type: assetType, // STOCK, FUND или INDEX
       });
 
       return {
@@ -12666,6 +12551,7 @@ export class MarketDataSyncService {
         ticker: 'MCFTR',
         date: mskDateStr,
         price: moexRes.price,
+        type: 'INDEX', // Помечаем как ИНДЕКС
       });
 
       return {
@@ -12689,21 +12575,16 @@ export class MarketDataSyncService {
       const hasOfficial = cached.some(d => !d.isManual);
       const isFresh = await marketDb.isCacheValid(lockKey, TTL_24_HOURS);
 
-      // Если есть официальные данные И они свежие (проверяли менее 24ч назад) -> отдаем кэш
       if (hasOfficial && isFresh) {
         return cached;
       }
 
-      // Иначе -> идем на Мосбиржу
       const fetched = await MoexApiGateway.fetchDividends(resolvedTicker);
-      
       if (fetched.length > 0) {
         await marketDb.reconcileAndSaveMoexDividends(resolvedTicker, fetched);
       }
       
-      // Отмечаем время успешной проверки
       await marketDb.setCacheUpdated(lockKey);
-
       return await marketDb.dividends.where('ticker').equals(resolvedTicker).toArray();
     });
   }
@@ -12711,7 +12592,7 @@ export class MarketDataSyncService {
 
 ===
 
-FILE 44/50
+FILE 45/51
 PATH: stock-analyzer/src/store/usePortfolioStore.ts
 ---
 import { create } from 'zustand';
@@ -12731,12 +12612,16 @@ export interface ICachedMatrix {
   result: IMonthlyMatrixRow[];
 }
 
+export type OpenPortfolioMode = 'default' | 'analytics';
+
 interface PortfolioState {
   portfolios: IPortfolio[];
   groups: IPortfolioGroup[];
   settings: IGlobalSettings;
   activeGroupId: string | null;
+  
   selectedPortfolioId: string | null;
+  openPortfolioMode: OpenPortfolioMode;
   
   calculationsCache: Record<string, ICachedCalculation>;
   matrixCache: Record<string, ICachedMatrix>;
@@ -12746,7 +12631,7 @@ interface PortfolioState {
   clearCalculationCache: (portfolioId?: string) => void;
 
   loadFromStorage: () => void;
-  setSelectedPortfolioId: (id: string | null) => void;
+  openPortfolio: (id: string | null, mode?: OpenPortfolioMode) => void;
   
   updateSettings: (newSettings: Partial<IGlobalSettings>) => void;
   addCustomTickerRename: (rename: ITickerRename) => void;
@@ -12777,9 +12662,10 @@ interface PortfolioState {
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   portfolios: [],
   groups: [],
-  settings: DEFAULT_SETTINGS,
+  settings: { ...DEFAULT_SETTINGS, orientation: 'auto' },
   activeGroupId: null,
   selectedPortfolioId: null,
+  openPortfolioMode: 'default',
   
   calculationsCache: {},
   matrixCache: {},
@@ -12819,7 +12705,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     set({ portfolios, groups, settings });
   },
 
-  setSelectedPortfolioId: (id) => set({ selectedPortfolioId: id }),
+  openPortfolio: (id, mode = 'default') => set({ selectedPortfolioId: id, openPortfolioMode: mode }),
 
   setActiveGroupId: (groupId) => set({ activeGroupId: groupId }),
 
@@ -12856,14 +12742,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     get().updateSettings({ stockSplits: updatedSplits });
   },
 
-  // БЕЗОПАСНОЕ ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ИМПОРТЕ
   restoreFullData: (data) => {
-    // Безопасное слияние настроек: если в файле нет каких-то полей, берем дефолтные
     const safeSettings: IGlobalSettings = {
       ...DEFAULT_SETTINGS,
       ...data.settings,
       tickerRenames: data.settings?.tickerRenames || [],
       stockSplits: data.settings?.stockSplits || [],
+      orientation: data.settings?.orientation || 'auto',
     };
 
     set({
@@ -12877,8 +12762,6 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.saveSettings(safeSettings);
     UserStorage.savePortfolios(data.portfolios || []);
     localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(data.groups || []));
-    
-    // Обязательный сброс кэшей расчетов, чтобы новые портфели пересчитались "с чистого листа"
     get().clearCalculationCache();
   },
 
@@ -13007,80 +12890,73 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
 ===
 
-FILE 45/50
+FILE 46/51
 PATH: stock-analyzer/src/types/domain.ts
 ---
-// Данные о сплите/консолидации
 export interface IStockSplit {
   ticker: string;
-  date: string; // ISO 8601 UTC
-  coefficient: number; // New Shares / Old Shares
+  date: string;
+  coefficient: number;
 }
 
-// Глобальные настройки приложения
+export type ScreenOrientation = 'auto' | 'portrait' | 'landscape';
+
 export interface IGlobalSettings {
-  dividendTaxRate: number; // по умолчанию 15%
+  dividendTaxRate: number;
   tickerRenames: ITickerRename[];
   stockSplits?: IStockSplit[];
+  orientation?: ScreenOrientation;
 }
 
-// Переименование тикера
 export interface ITickerRename {
   oldTicker: string;
   newTicker: string;
-  changeDate: string; // ISO 8601 UTC
+  changeDate: string;
 }
 
-// Тип актива в портфеле
 export type AssetType = 'STOCK' | 'FUND';
 
-// Актив внутри контрольной точки
 export interface IAssetAllocation {
   ticker: string;
   weight: number;
   type: AssetType;
 }
 
-// Контрольная точка (Milestone)
 export interface IMilestone {
   id: string;
-  date: string; // ISO 8601 UTC
+  date: string;
   assets: IAssetAllocation[];
 }
 
-// Портфель
 export interface IPortfolio {
   id: string;
   groupId: string | null;
   name: string;
-  createdAt: string; // ISO 8601 UTC
-  closedAt: string | null; // ISO 8601 UTC или null
+  createdAt: string;
+  closedAt: string | null;
   milestones: IMilestone[];
 }
 
-// Группа портфелей (Папка)
 export interface IPortfolioGroup {
   id: string;
   name: string;
   isArchive?: boolean;
 }
 
-// Запись цены в IndexedDB
 export interface IPriceHistory {
   ticker: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   price: number;
+  type?: AssetType | 'INDEX';
 }
 
-// Запись дивиденда в IndexedDB
 export interface IDividendHistory {
   ticker: string;
-  date: string; // YYYY-MM-DD (дата отсечки)
-  value: number; // Грязный дивиденд на 1 акцию
-  isManual?: boolean; // Флаг: внесен вручную
+  date: string;
+  value: number;
+  isManual?: boolean;
 }
 
-// Структура файла бэкапа JSON
 export interface IExportData {
   schemaVersion: number;
   exportedAt: string;
@@ -13091,7 +12967,7 @@ export interface IExportData {
 
 ===
 
-FILE 46/50
+FILE 47/51
 PATH: stock-analyzer/src/vite-env.d.ts
 ---
 /// <reference types="vite/client" />
@@ -13099,7 +12975,7 @@ PATH: stock-analyzer/src/vite-env.d.ts
 
 ===
 
-FILE 47/50
+FILE 48/51
 PATH: stock-analyzer/tailwind.config.js
 ---
 /** @type {import('tailwindcss').Config} */
@@ -13126,7 +13002,7 @@ export default {
 
 ===
 
-FILE 48/50
+FILE 49/51
 PATH: stock-analyzer/tsconfig.json
 ---
 {
@@ -13156,7 +13032,7 @@ PATH: stock-analyzer/tsconfig.json
 
 ===
 
-FILE 49/50
+FILE 50/51
 PATH: stock-analyzer/tsconfig.node.json
 ---
 {
@@ -13172,7 +13048,7 @@ PATH: stock-analyzer/tsconfig.node.json
 
 ===
 
-FILE 50/50
+FILE 51/51
 PATH: stock-analyzer/vite.config.ts
 ---
 import { defineConfig } from 'vite';

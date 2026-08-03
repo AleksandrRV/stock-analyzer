@@ -65,7 +65,7 @@ interface PortfolioState {
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   portfolios: [],
   groups: [],
-  settings: { ...DEFAULT_SETTINGS, orientation: 'auto' },
+  settings: { ...DEFAULT_SETTINGS },
   activeGroupId: null,
   selectedPortfolioId: null,
   openPortfolioMode: 'default',
@@ -101,7 +101,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
   loadFromStorage: () => {
     const portfolios = UserStorage.getPortfolios();
-    const settings = UserStorage.getSettings();
+    const settings = { ...DEFAULT_SETTINGS, ...UserStorage.getSettings() };
     const savedGroups = localStorage.getItem(GROUPS_STORAGE_KEY);
     const groups: IPortfolioGroup[] = savedGroups ? JSON.parse(savedGroups) : [];
     

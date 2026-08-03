@@ -16,23 +16,50 @@ export function App() {
     loadFromStorage();
   }, [loadFromStorage]);
 
-  // Активация ориентации при первом же касании любого места на смартфоне
+  // Глобальное управление ориентацией экрана
   useEffect(() => {
-    const handleFirstTouch = async () => {
+    const applyOrientation = async () => {
       if (!screen.orientation || !('lock' in screen.orientation)) return;
+      
       try {
         if (settings.orientation === 'portrait') {
-          await (screen.orientation as any).lock('portrait-primary');
+          await (screen.orientation as any).lock('portrait');
         } else if (settings.orientation === 'landscape') {
-          await (screen.orientation as any).lock('landscape-primary');
+          await (screen.orientation as any).lock('landscape');
+        } else if (settings.orientation === 'auto') {
+          screen.orientation.unlock();
         }
-      } catch (e) {
-        // Ignored if unsupported
+      } catch (err) {
+        // Ошибка часто возникает если приложение не в полноэкранном режиме (PWA)
+        console.warn('Failed to lock orientation:', err);
       }
     };
 
-    window.addEventListener('touchstart', handleFirstTouch, { once: true });
-    return () => window.removeEventListener('touchstart', handleFirstTouch);
+    // 1. Попытка немедленной фиксации (сработает если уже был жест)
+    applyOrientation();
+
+    // 2. Фиксация при первом же касании (требование браузеров для безопасности)
+    const handleGesture = () => {
+      applyOrientation();
+      window.removeEventListener('touchstart', handleGesture);
+      window.removeEventListener('mousedown', handleGesture);
+    };
+    window.addEventListener('touchstart', handleGesture);
+    window.addEventListener('mousedown', handleGesture);
+
+    // 3. Повторная фиксация при возврате в приложение (resume)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        applyOrientation();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('touchstart', handleGesture);
+      window.removeEventListener('mousedown', handleGesture);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [settings.orientation]);
 
   return (
@@ -54,7 +81,7 @@ export function App() {
           </main>
 
           <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.1.2
+            MOEX Strategy Analyzer PWA &bull; v1.1.3
           </footer>
         </div>
       </ThemeProvider>

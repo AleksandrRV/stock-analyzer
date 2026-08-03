@@ -65,24 +65,23 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // ФИКСАЦИЯ ОРИЕНТАЦИИ СТРОГО ВНУТРИ ПОЛЬЗОВАТЕЛЬСКОГО ТАПА
   const handleSetOrientation = async (mode: ScreenOrientation) => {
     updateSettings({ orientation: mode });
 
     if (screen.orientation && 'lock' in screen.orientation) {
       try {
         if (mode === 'portrait') {
-          await (screen.orientation as any).lock('portrait-primary');
+          await (screen.orientation as any).lock('portrait');
           showToast('success', 'Ориентация зафиксирована: Вертикально');
         } else if (mode === 'landscape') {
-          await (screen.orientation as any).lock('landscape-primary');
+          await (screen.orientation as any).lock('landscape');
           showToast('success', 'Ориентация зафиксирована: Горизонтально');
         } else {
           screen.orientation.unlock();
           showToast('success', 'Ориентация: Автоматически');
         }
       } catch (err) {
-        console.warn('Screen orientation lock failed (requires PWA mode):', err);
+        console.warn('Screen orientation lock failed (requires PWA standalone mode):', err);
       }
     }
   };
@@ -190,13 +189,13 @@ export const SettingsView: React.FC = () => {
         <div className="space-y-2 max-w-xs">
           <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">Ставка налога на дивиденды (%):</label>
           <div className="flex items-center gap-2">
-            <input type="number" step="1" min="0" max="100" value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate} onChange={e => { const val = e.target.value; if (val === '') updateSettings({ dividendTaxRate: 0 }); else { const p = parseFloat(val); if (!isNaN(p) && p >= 0 && p <= 100) updateSettings({ dividendTaxRate: p }); } }} onBlur={e => { if (isNaN(parseFloat(e.target.value))) updateSettings({ dividendTaxRate: 0 }); }} className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-sm font-mono font-bold w-28 focus:ring-2 focus:ring-sky-500" />
-            <span className="text-xs text-slate-400">% (по умолчанию 15%)</span>
+            <input type="number" step="1" min="0" max="100" value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate} onChange={e => { const val = e.target.value; if (val === '') updateSettings({ dividendTaxRate: 0 }); else { const p = parseFloat(val); if (!isNaN(p) && p >= 0 && p <= 100) updateSettings({ dividendTaxRate: p }); } }} onBlur={e => { if (isNaN(parseFloat(e.target.value))) updateSettings({ dividendTaxRate: 0 }); }} className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-sky-500" />
+            <span className="text-sm font-mono text-slate-400">%</span>
           </div>
         </div>
 
         <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 space-y-4">
-          <div><h4 className="font-semibold text-sm">Переименования тикеров (Corporate Actions)</h4><p className="text-xs text-slate-400">Правила смены тикеров на Мосбирже</p></div>
+          <div><h4 className="font-semibold text-sm flex items-center gap-1.5"><RefreshCw className="w-4 h-4 text-purple-500" /><span>Переименования тикеров (Машина времени)</span></h4><p className="text-xs text-slate-400">Правила подстановки тикеров для корректных запросов к API в прошлом</p></div>
           <form onSubmit={handleAddRename} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
             <input type="text" required placeholder="Старый (TCSG)" value={oldTicker} onChange={e => setOldTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
             <input type="text" required placeholder="Новый (T)" value={newTicker} onChange={e => setNewTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
