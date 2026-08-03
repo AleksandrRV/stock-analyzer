@@ -8,7 +8,7 @@
 
 ===
 COLLECTED FILES REPORT
-Created: 2026-08-02 21:55:56
+Created: 2026-08-03 09:32:18
 Folders: stock-analyzer
 Extensions: .cs, .mtgn, .js, .bat, .md, .asmdef, .bhl, .txt, .json, .html, .tsx, .css, .ts
 Files: 50
@@ -284,12 +284,20 @@ PATH: archtecture_and_buisnes.md
 При переключении вкладок или расчете глубокой матрицы по месяцам приложение могло генерировать 100+ одновременных запросов на одну и ту же бумагу.
 Реализован механизм `withLock`: если несколько функций запрашивают цену `SBER` за `2024-01-01` одновременно, к Мосбирже уйдет только **один** HTTP-запрос. Остальные вызовы будут «подписаны» на ожидание этого единственного промиса в оперативной памяти.
 
-### 5.3. Кэширование расчетов (Zustand Cache)
-Математические расчеты портфеля кэшируются на уровне глобального стора. Переключение между вкладкой Настроек и Дашбордом занимает **0 миллисекунд** (отсутствует перерисовка со спиннером). Кэш расчетов сбрасывается только при:
+### 5.3. Кэширование расчетов и Матрицы (Zustand Cache)
+Математические расчеты портфеля и Матрица доходностей по месяцам кэшируются на уровне глобального стора. Переключение между вкладками занимает **0 миллисекунд**. 
+Кэш расчетов инвалидируется (сбрасывается) только при:
+* Наступлении нового часа (сверка `calculatedAtHour` с текущим часом устройства).
 * Изменении состава контрольной точки.
-* Изменении глобальной ставки налога.
+* Изменении глобальной ставки налога или тикеров.
 * Добавлении ручного дивиденда.
-* Очистке базы данных.
+* Ручной очистке базы данных.
+
+### 5.4. Почему НЕ кэшируются графики таймфреймов (Плавающий Базлайн 0%)
+* **Потенциальное заблуждение:** Может показаться логичным закэшировать кривую графика за "Всё время" (ALL) и просто "обрезать" массив для фильтров "1 Месяц" (1M) или "С начала года" (YTD).
+* **Бизнес-требование:** Это **категорически запрещено** требованиями аналитики. Для наглядного сравнения динамики расхождения Портфеля и Индекса (MCFTR) **любой выбранный отрезок времени должен строиться строго из нулевой точки (0.00%)**. 
+* *Пример ошибки обрезки:* Если мы "обрежем" сохраненный график ALL, то график "за 1 последний месяц" начнется с отметки, скажем, `+45%` (накопленных за 2 года до этого). Это визуально сломает относительную динамику текущего месяца.
+* **Решение:** При каждом клике на таймфрейм (1M, 3M, 1Y) математический движок **запускается заново** и пересчитывает множители сложного процента от `1.0` строго с даты старта выбранного таймфрейма. Благодаря тому, что под капотом все сырые котировки уже лежат в `IndexedDB` и защищены `RAM Lock`, такой "пересчет с нуля" занимает доли секунды и не нагружает сеть, гарантируя при этом 100% математическую достоверность графиков.
 
 ===
 
@@ -7793,7 +7801,7 @@ export default {
 FILE 8/50
 PATH: stock-analyzer/src/App.tsx
 ---
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
@@ -7805,7 +7813,12 @@ import { PwaInstallPrompt } from './components/common/PwaInstallPrompt';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
-  const selectedPortfolioId = usePortfolioStore(state => state.selectedPortfolioId);
+  const { selectedPortfolioId, loadFromStorage } = usePortfolioStore();
+
+  // Глобальная первичная загрузка данных
+  useEffect(() => {
+    loadFromStorage();
+  }, [loadFromStorage]);
 
   return (
     <ErrorBoundary>
@@ -7814,7 +7827,6 @@ export function App() {
           <Header activeTab={activeTab} setActiveTab={setActiveTab} />
           
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-            {/* Промо баннер установки PWA */}
             <PwaInstallPrompt />
 
             {activeTab === 'settings' ? (
@@ -7842,7 +7854,7 @@ export default App;
 FILE 9/50
 PATH: stock-analyzer/src/components/DashboardView.tsx
 ---
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { IPortfolio, IPortfolioGroup } from '../types/domain';
 import { PortfolioCard } from './PortfolioCard';
@@ -7867,7 +7879,6 @@ export const DashboardView: React.FC = () => {
   const {
     groups,
     activeGroupId,
-    loadFromStorage,
     setActiveGroupId,
     setSelectedPortfolioId,
     createPortfolio,
@@ -7887,10 +7898,6 @@ export const DashboardView: React.FC = () => {
   const [movingPortfolio, setMovingPortfolio] = useState<IPortfolio | null>(null);
 
   const [showDebug, setShowDebug] = useState(false);
-
-  useEffect(() => {
-    loadFromStorage();
-  }, [loadFromStorage]);
 
   const visiblePortfolios = getVisiblePortfolios();
 
@@ -9585,7 +9592,8 @@ PATH: stock-analyzer/src/components/analytics/MonthlyReturnsMatrix.tsx
 ---
 import React, { useState, useEffect } from 'react';
 import { IPortfolio } from '../../types/domain';
-import { PortfolioCalculationService, IMonthlyMatrixRow } from '../../services/engine/PortfolioCalculationService';
+import { PortfolioCalculationService } from '../../services/engine/PortfolioCalculationService';
+import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { CalendarDays, Loader2, HelpCircle } from 'lucide-react';
 
 interface Props {
@@ -9593,17 +9601,27 @@ interface Props {
 }
 
 export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
-  const [matrixRows, setMatrixRows] = useState<IMonthlyMatrixRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { settings, matrixCache, setMatrixCache } = usePortfolioStore();
+  
+  const currentHour = new Date().getHours();
+  const cachedWrapper = matrixCache[portfolio.id];
+  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentHour;
+
+  const [loading, setLoading] = useState(!isCacheValid);
 
   useEffect(() => {
+    if (isCacheValid) {
+      setLoading(false);
+      return;
+    }
+
     let isMounted = true;
     setLoading(true);
 
-    PortfolioCalculationService.calculateMonthlyReturnsMatrix(portfolio)
+    PortfolioCalculationService.calculateMonthlyReturnsMatrix(portfolio, settings)
       .then(rows => {
         if (isMounted) {
-          setMatrixRows(rows);
+          setMatrixCache(portfolio.id, rows, currentHour);
           setLoading(false);
         }
       })
@@ -9615,13 +9633,15 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
     return () => {
       isMounted = false;
     };
-  }, [portfolio]);
+  }, [portfolio, settings, isCacheValid, currentHour, setMatrixCache]);
+
+  const matrixRows = isCacheValid ? cachedWrapper.result : [];
 
   if (loading) {
     return (
       <div className="p-8 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl flex flex-col items-center justify-center gap-2 text-xs font-mono text-slate-400">
         <Loader2 className="w-6 h-6 animate-spin text-sky-500" />
-        <span>Загрузка котировок и расчет трех показателей по каждому месяцу...</span>
+        <span>Загрузка котировок и расчет показателей по каждому месяцу...</span>
       </div>
     );
   }
@@ -9634,22 +9654,15 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
     );
   }
 
-  // Стили бейджей Альфы
   const getAlphaStyle = (alpha: number | null) => {
     if (alpha === null) return 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700';
-    if (alpha > 0.9) {
-      return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
-    }
-    if (alpha >= 0.01) {
-      return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
-    }
+    if (alpha > 0.9) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
+    if (alpha >= 0.01) return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
     return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30';
   };
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-5 space-y-6 shadow-sm">
-      
-      {/* ШАПКА И ЛЕГЕНДА */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
         <div className="flex items-center gap-2 font-bold text-sm">
           <CalendarDays className="w-4 h-4 text-sky-500" />
@@ -9669,22 +9682,18 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
         </div>
       </div>
 
-      {/* РАЗБИЕНИЕ ПО ГОДАМ */}
       <div className="space-y-6">
         {matrixRows.map(row => {
           const activeMonths = row.months.filter(m => m.portfolioReturn !== null);
 
           return (
             <div key={row.year} className="space-y-3 p-4 bg-slate-50/50 dark:bg-slate-900/40 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
-              
-              {/* БАННЕР ГОДА И ИТОГОВЫХ ПОКАЗАТЕЛЕЙ ЗА ГОД */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-700/80 pb-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xl font-bold font-mono text-slate-800 dark:text-slate-100">{row.year} год</span>
                   <span className="text-xs text-slate-400 font-mono">({activeMonths.length} мес.)</span>
                 </div>
 
-                {/* Итого за год */}
                 {row.yearPortfolioReturn !== null && row.yearAlpha !== null && (
                   <div className="flex items-center gap-3 text-xs font-mono bg-white dark:bg-slate-800 p-2 rounded-xl border border-slate-200 dark:border-slate-700 shadow-xs">
                     <div>
@@ -9693,14 +9702,12 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
                         {row.yearPortfolioReturn >= 0 ? '+' : ''}{row.yearPortfolioReturn}%
                       </span>
                     </div>
-
                     <div className="border-l border-slate-200 dark:border-slate-700 pl-3">
                       <span className="text-slate-400 block text-[10px]">MCFTR:</span>
                       <span className={`font-bold ${row.yearMcftrReturn! >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                         {row.yearMcftrReturn! >= 0 ? '+' : ''}{row.yearMcftrReturn}%
                       </span>
                     </div>
-
                     <div className={`px-2.5 py-1 rounded-lg border font-bold flex flex-col items-end ${getAlphaStyle(row.yearAlpha)}`}>
                       <span className="text-[9px] uppercase tracking-wider opacity-75">Альфа за год:</span>
                       <span>{row.yearAlpha >= 0 ? '+' : ''}{row.yearAlpha}%</span>
@@ -9709,15 +9716,11 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
                 )}
               </div>
 
-              {/* АДАПТИВНАЯ СЕТКА КАРТОЧЕК МЕСЯЦЕВ (Минимальная ширина каждой карточки: 105px) */}
               <div className="grid grid-cols-[repeat(auto-fill,minmax(105px,1fr))] gap-2.5">
                 {row.months.map((cell, idx) => {
                   if (cell.portfolioReturn === null || cell.alpha === null) {
                     return (
-                      <div
-                        key={idx}
-                        className="p-2.5 bg-white/40 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60 rounded-xl text-center text-slate-300 dark:text-slate-700 text-xs font-mono flex flex-col justify-center items-center min-h-[86px]"
-                      >
+                      <div key={idx} className="p-2.5 bg-white/40 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800/60 rounded-xl text-center text-slate-300 dark:text-slate-700 text-xs font-mono flex flex-col justify-center items-center min-h-[86px]">
                         <span className="text-[10px] text-slate-400 block mb-1">{cell.monthName}</span>
                         <span>&mdash;</span>
                       </div>
@@ -9725,30 +9728,16 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
                   }
 
                   return (
-                    <div
-                      key={idx}
-                      className={`p-2.5 rounded-xl border flex flex-col justify-between space-y-1.5 transition-all shadow-xs ${getAlphaStyle(cell.alpha)}`}
-                      title={`Период: ${cell.startDateDisplay} — ${cell.finishDateDisplay}\n` +
-                        `Портфель: ${cell.portfolioReturn >= 0 ? '+' : ''}${cell.portfolioReturn}%\n` +
-                        `MCFTR: ${cell.mcftrReturn! >= 0 ? '+' : ''}${cell.mcftrReturn}%\n` +
-                        `Альфа: ${cell.alpha >= 0 ? '+' : ''}${cell.alpha}%` +
-                        (cell.isPartial ? '\n(Неполный месяц)' : '')
-                      }
+                    <div key={idx} className={`p-2.5 rounded-xl border flex flex-col justify-between space-y-1.5 transition-all shadow-xs ${getAlphaStyle(cell.alpha)}`}
+                      title={`Период: ${cell.startDateDisplay} — ${cell.finishDateDisplay}\nПортфель: ${cell.portfolioReturn >= 0 ? '+' : ''}${cell.portfolioReturn}%\nMCFTR: ${cell.mcftrReturn! >= 0 ? '+' : ''}${cell.mcftrReturn}%\nАльфа: ${cell.alpha >= 0 ? '+' : ''}${cell.alpha}%${cell.isPartial ? '\n(Неполный месяц)' : ''}`}
                     >
-                      {/* Месяц + Иконка неполного месяца */}
                       <div className="flex items-center justify-between text-xs font-semibold font-mono opacity-80 border-b border-current/15 pb-1">
                         <span>{cell.monthName}</span>
-                        {cell.isPartial && (
-                          <span className="text-amber-500 font-bold" title="Неполный месяц">*</span>
-                        )}
+                        {cell.isPartial && <span className="text-amber-500 font-bold" title="Неполный месяц">*</span>}
                       </div>
-
-                      {/* Альфа за месяц (Крупно) */}
                       <div className="text-sm font-bold font-mono tracking-tight my-0.5 whitespace-nowrap">
                         {cell.alpha >= 0 ? '+' : ''}{cell.alpha}%
                       </div>
-
-                      {/* Подписи: Портф и MCFTR */}
                       <div className="text-[10px] font-mono space-y-0.5 border-t border-current/15 pt-1">
                         <div className="flex justify-between items-center whitespace-nowrap gap-1">
                           <span className="opacity-75">Портф:</span>
@@ -9763,12 +9752,10 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
                   );
                 })}
               </div>
-
             </div>
           );
         })}
       </div>
-
     </div>
   );
 };
@@ -9783,6 +9770,7 @@ import { ICalculatedPortfolio, IEquityChartPoint, PortfolioCalculationService } 
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { IPortfolio } from '../../types/domain';
 import { APP_CONFIG } from '../../constants/config';
+import { usePortfolioStore } from '../../store/usePortfolioStore';
 
 import {
   ResponsiveContainer,
@@ -9805,6 +9793,8 @@ interface Props {
 }
 
 export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio }) => {
+  const { settings } = usePortfolioStore(); // ДОБАВЛЕНО: получаем настройки
+  
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('ALL');
   const [chartPoints, setChartPoints] = useState<IEquityChartPoint[]>(calculatedPortfolio.chartPoints || []);
   const [showSpinner, setShowSpinner] = useState(false);
@@ -9824,9 +9814,7 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
     return d;
   };
 
-  // Пересчет кривой с задержкой появления спиннера (от дерганий)
   const updateChartRange = useCallback(async (filter: TimeFilter, startOverride?: string, finishOverride?: string) => {
-    // Включаем таймер на появление спиннера
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       setShowSpinner(true);
@@ -9877,19 +9865,19 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
       }
     }
 
+    // ИСПРАВЛЕНО: передаем settings 4-м аргументом
     const points = await PortfolioCalculationService.calculateChartCurveForRange(
       portfolio,
       targetStartIso,
-      targetFinishIso
+      targetFinishIso,
+      settings 
     );
 
-    // Сбрасываем таймер и скрываем спиннер
     if (timerRef.current) clearTimeout(timerRef.current);
     setShowSpinner(false);
 
-    // Обновляем точки бесшовно
     setChartPoints(points);
-  }, [portfolio, calculatedPortfolio]);
+  }, [portfolio, calculatedPortfolio, settings]);
 
   const handleFilterChange = (filter: TimeFilter) => {
     setTimeFilter(filter);
@@ -9951,7 +9939,6 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-5 space-y-4 shadow-sm relative overflow-hidden">
       
-      {/* СПИННЕР ПОЯВЛЯЕТСЯ ТОЛЬКО ПРИ ДОЛГОЙ ЗАГРУЗКЕ (> 300мс) */}
       {showSpinner && (
         <div className="absolute inset-0 z-20 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xs rounded-2xl flex flex-col items-center justify-center gap-2 text-xs font-mono text-slate-500 animate-in fade-in">
           <Loader2 className="w-6 h-6 animate-spin text-sky-500" />
@@ -9959,14 +9946,12 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
         </div>
       )}
 
-      {/* ШАПКА ГРАФИКА */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
         <div className="flex items-center gap-2 font-bold text-sm">
           <ChartIcon className="w-4 h-4 text-sky-500" />
           <span>Кривая доходности (Базлайн: 0.00%)</span>
         </div>
 
-        {/* Таймфреймы */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-xs font-mono overflow-x-auto">
           {(['1M', '3M', '6M', '1Y', 'YTD', 'ALL', 'CUSTOM'] as TimeFilter[]).map(filter => (
             <button
@@ -9984,7 +9969,6 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
         </div>
       </div>
 
-      {/* ПОЛЕ ВЫБОРА СВОЕГО ПЕРИОДА */}
       {timeFilter === 'CUSTOM' && (
         <form onSubmit={handleApplyCustomRange} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-wrap items-end gap-3 text-xs font-mono animate-in fade-in">
           <div className="space-y-1">
@@ -10027,7 +10011,6 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
             <LineChart data={chartPoints} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
               
-              {/* ПРОПОРЦИОНАЛЬНАЯ ОСЬ X ПО ВРЕМЕНИ (type="number" + scale="time") */}
               <XAxis
                 dataKey="timestamp"
                 type="number"
@@ -10226,6 +10209,7 @@ import { IMilestone, IAssetAllocation, AssetType } from '../../types/domain';
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { TickerResolver } from '../../engine/TickerResolver';
 import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
+import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { Calendar, Plus, Trash2, Scale, AlertCircle, X, HelpCircle } from 'lucide-react';
 
 interface Props {
@@ -10241,39 +10225,39 @@ export const MilestoneEditorModal: React.FC<Props> = ({
   onSave,
   onClose,
 }) => {
-  // Локальная дата и час (YYYY-MM-DDTHH:00)
-  const [localDateTime, setLocalDateTime] = useState(() => {
-    const now = new Date();
-    now.setMinutes(0, 0, 0);
-    return now.toISOString().slice(0, 13) + ':00';
-  });
+  const { settings } = usePortfolioStore();
+
+  const [localDateTime, setLocalDateTime] = useState(() => 
+    DateTimeStandardizer.getLocalDatetimeLocalString()
+  );
 
   const [assets, setAssets] = useState<IAssetAllocation[]>([]);
   const [newTickerInput, setNewTickerInput] = useState('');
   const [newAssetType, setNewAssetType] = useState<AssetType>('STOCK');
 
   useEffect(() => {
-    if (initialMilestone) {
+    if (initialMilestone && !initialMilestone.id.startsWith('new_')) {
+      // Истинная старая точка - переводим сохраненный UTC в локальный дисплей для инпута
       const localDisp = DateTimeStandardizer.formatToLocalDisplay(initialMilestone.date);
       setLocalDateTime(localDisp.replace(' ', 'T'));
       setAssets(initialMilestone.assets || []);
+    } else if (initialMilestone && initialMilestone.id.startsWith('new_')) {
+      // Скопированная точка или новая - используем текущее локальное время
+      setLocalDateTime(DateTimeStandardizer.getLocalDatetimeLocalString(initialMilestone.date));
+      setAssets(initialMilestone.assets || []);
     } else {
-      const now = new Date();
-      now.setMinutes(0, 0, 0);
-      setLocalDateTime(now.toISOString().slice(0, 13) + ':00');
+      setLocalDateTime(DateTimeStandardizer.getLocalDatetimeLocalString());
       setAssets([]);
     }
   }, [initialMilestone, isOpen]);
 
   if (!isOpen) return null;
 
-  // Рассчитываем суммарный процент активов
   const totalWeightRaw = assets.reduce((sum, a) => sum + (Number(a.weight) || 0), 0);
-  const totalWeight = Math.round(totalWeightRaw * 100) / 100; // Округление для погрешностей float
+  const totalWeight = Math.round(totalWeightRaw * 100) / 100; 
   const freeCashWeight = Math.max(0, Math.round((100 - totalWeight) * 100) / 100);
   const isOverallocated = totalWeight > 100.001;
 
-  // Добавление актива
   const handleAddAsset = (tickerToAdd: string, typeToAdd: AssetType = 'STOCK') => {
     const cleanTicker = tickerToAdd.trim().toUpperCase();
     if (!cleanTicker) return;
@@ -10287,40 +10271,32 @@ export const MilestoneEditorModal: React.FC<Props> = ({
     setNewTickerInput('');
   };
 
-  // Удаление актива
   const handleRemoveAsset = (index: number) => {
     setAssets(assets.filter((_, i) => i !== index));
   };
 
-  // Изменение веса актива с точностью ДО СОТЫХ
   const handleWeightChange = (index: number, newWeight: number) => {
     const updated = [...assets];
-    // Округляем до сотых
     const rounded = Math.floor(newWeight * 100) / 100;
     updated[index].weight = Math.max(0, Math.min(100, rounded));
     setAssets(updated);
   };
 
-  // КНОПКА: Автоматическая ребалансировка с округлением В МЕНЬШУЮ СТОРУНУ
   const handleAutoRebalance = () => {
     if (assets.length === 0) return;
-    // Строгое округление в меньшую сторону до сотых
     const equalWeight = Math.floor((100 / assets.length) * 100) / 100;
     setAssets(assets.map(a => ({ ...a, weight: equalWeight })));
   };
 
-  // Сохранение точки
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isOverallocated) return;
 
     const utcIso = DateTimeStandardizer.toUTCISOString(new Date(localDateTime));
-
-    // Если это новая точка (нет id) или скопированная точка — создаем новый ID
     const isNewPoint = !initialMilestone?.id || initialMilestone.id.startsWith('new_');
 
     const milestoneToSave: IMilestone = {
-      id: isNewPoint ? `mst_${Date.now()}_${Math.random().toString(36).substring(2, 5)}` : initialMilestone.id,
+      id: isNewPoint ? `mst_${Date.now()}_${Math.random().toString(36).substring(2, 5)}` : initialMilestone!.id,
       date: utcIso,
       assets: assets.map(a => ({ 
         ...a, 
@@ -10339,7 +10315,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-xl max-h-[90vh] flex flex-col">
         
-        {/* Заголовок */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
@@ -10361,7 +10336,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
 
         <form onSubmit={handleSave} className="space-y-5 overflow-y-auto pr-1 flex-1">
           
-          {/* ПОЛЕ: Дата и Час в локальном времени */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between">
               <span>Дата и час среза (Локальное время):</span>
@@ -10377,7 +10351,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             />
           </div>
 
-          {/* ИНДИКАТОР ВЕСОВ И СВОБОДНОГО КЭША (LQDT) */}
           <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 rounded-xl space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span>Распределение портфеля:</span>
@@ -10386,7 +10359,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
               </span>
             </div>
 
-            {/* Прогресс-бар */}
             <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden flex">
               <div
                 className={`h-full transition-all ${isOverallocated ? 'bg-rose-500' : 'bg-sky-500'}`}
@@ -10404,13 +10376,8 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
               <span>Свободный кэш (Авто-LQDT): <strong className="text-emerald-500">{freeCashWeight.toFixed(2)}%</strong></span>
               {assets.length > 1 && (
-                <button
-                  type="button"
-                  onClick={handleAutoRebalance}
-                  className="flex items-center gap-1 text-sky-600 dark:text-sky-400 hover:underline font-medium"
-                >
-                  <Scale className="w-3.5 h-3.5" />
-                  <span>Поровну (Ребаланс)</span>
+                <button type="button" onClick={handleAutoRebalance} className="flex items-center gap-1 text-sky-600 dark:text-sky-400 hover:underline font-medium">
+                  <Scale className="w-3.5 h-3.5" /><span>Поровну (Ребаланс)</span>
                 </button>
               )}
             </div>
@@ -10423,7 +10390,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             )}
           </div>
 
-          {/* ДОБАВЛЕНИЕ НОВОГО АКТИВА */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Добавить бумагу:</label>
             <div className="flex gap-2">
@@ -10451,7 +10417,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
               </button>
             </div>
 
-            {/* Быстрый выбор */}
             <div className="flex items-center gap-1.5 flex-wrap pt-1">
               <span className="text-[11px] text-slate-400">Быстро:</span>
               {POPULAR_MOEX_ASSETS.slice(0, 8).map(pop => (
@@ -10467,7 +10432,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* СПИСОК ДОБАВЛЕННЫХ АКТИВОВ */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
               Состав активов ({assets.length}):
@@ -10480,14 +10444,11 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             ) : (
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                 {assets.map((asset, index) => {
-                  const resolved = TickerResolver.resolveTicker(asset.ticker, targetUtcIso);
+                  const resolved = TickerResolver.resolveTicker(asset.ticker, targetUtcIso, settings.tickerRenames);
                   const isRenamed = resolved !== asset.ticker;
 
                   return (
-                    <div
-                      key={asset.ticker}
-                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm gap-3"
-                    >
+                    <div key={asset.ticker} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm gap-3">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-sky-500">{asset.ticker}</span>
                         <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-400">
@@ -10514,12 +10475,7 @@ export const MilestoneEditorModal: React.FC<Props> = ({
                           />
                           <span className="text-xs text-slate-400">%</span>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAsset(index)}
-                          className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
-                        >
+                        <button type="button" onClick={() => handleRemoveAsset(index)} className="p-1 text-slate-400 hover:text-rose-500 transition-colors">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -10530,24 +10486,12 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             )}
           </div>
 
-          {/* КНОПКИ ДЕЙСТВИЯ */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors"
-            >
-              Отмена
-            </button>
-            <button
-              type="submit"
-              disabled={isOverallocated}
-              className="px-5 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors"
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors">Отмена</button>
+            <button type="submit" disabled={isOverallocated} className="px-5 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
               Сохранить точку
             </button>
           </div>
-
         </form>
       </div>
     </div>
@@ -10670,22 +10614,15 @@ import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 
 interface Props {
   isOpen: boolean;
-  minDateIso: string | null; // Минимальная дата (последняя контрольная точка)
+  minDateIso: string | null; 
   onConfirm: (closedAtIso: string) => void;
   onClose: () => void;
 }
 
-export const ClosePortfolioModal: React.FC<Props> = ({
-  isOpen,
-  minDateIso,
-  onConfirm,
-  onClose,
-}) => {
-  const [localDateTime, setLocalDateTime] = useState(() => {
-    const now = new Date();
-    now.setMinutes(0, 0, 0);
-    return now.toISOString().slice(0, 13) + ':00';
-  });
+export const ClosePortfolioModal: React.FC<Props> = ({ isOpen, minDateIso, onConfirm, onClose }) => {
+  const [localDateTime, setLocalDateTime] = useState(() => 
+    DateTimeStandardizer.getLocalDatetimeLocalString()
+  );
 
   if (!isOpen) return null;
 
@@ -10744,18 +10681,10 @@ export const ClosePortfolioModal: React.FC<Props> = ({
           )}
 
           <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors"
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors">
               Отмена
             </button>
-            <button
-              type="submit"
-              disabled={isInvalid}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors"
-            >
+            <button type="submit" disabled={isInvalid} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
               Зафиксировать закрытие
             </button>
           </div>
@@ -11356,19 +11285,21 @@ import Dexie, { Table } from 'dexie';
 import { IPriceHistory, IDividendHistory } from '../types/domain';
 
 interface ICacheMeta {
-  key: string; // Например "DIV_SBER" или "PRICE_SBER_2024-01-01"
+  key: string;
   lastUpdatedMs: number;
 }
 
+// Список известных фондов ликвидности для безопасной очистки
+const KNOWN_FUNDS = ['LQDT', 'SBMM', 'AKMM', 'TRUR'];
+
 export class MarketDatabase extends Dexie {
-  prices!: Table<IPriceHistory, [string, string]>; // PK = [ticker, date]
-  dividends!: Table<IDividendHistory, [string, string]>; // PK = [ticker, date]
+  prices!: Table<IPriceHistory, [string, string]>;
+  dividends!: Table<IDividendHistory, [string, string]>;
   meta!: Table<ICacheMeta, string>;
 
   constructor() {
     super('MarketCacheDB');
 
-    // Версия 2: Переход на составные первичные ключи для абсолютной дедупликации!
     this.version(2).stores({
       prices: '[ticker+date], ticker, date',
       dividends: '[ticker+date], ticker, date, isManual',
@@ -11376,7 +11307,6 @@ export class MarketDatabase extends Dexie {
     });
   }
 
-  // Проверка актуальности кэша (TTL)
   async isCacheValid(key: string, ttlMs: number): Promise<boolean> {
     const record = await this.meta.get(key);
     if (!record) return false;
@@ -11387,7 +11317,6 @@ export class MarketDatabase extends Dexie {
     await this.meta.put({ key, lastUpdatedMs: Date.now() });
   }
 
-  // Дивиденды +- 30 дней
   async hasDividendInWindow(ticker: string, dateStr: string, windowDays = 30): Promise<boolean> {
     const cleanTicker = ticker.trim().toUpperCase();
     const targetTime = new Date(dateStr).getTime();
@@ -11397,7 +11326,6 @@ export class MarketDatabase extends Dexie {
     return existing.some(div => Math.abs(new Date(div.date).getTime() - targetTime) <= windowMs);
   }
 
-  // Сверка и автоматическая очистка ручных дивидендов
   async reconcileAndSaveMoexDividends(ticker: string, moexDividends: IDividendHistory[]) {
     const cleanTicker = ticker.trim().toUpperCase();
     const windowMs = 30 * 24 * 60 * 60 * 1000;
@@ -11408,7 +11336,6 @@ export class MarketDatabase extends Dexie {
       .filter(d => !!d.isManual)
       .toArray();
 
-    // Находим ключи ручных записей для удаления
     const manualKeysToDelete: [string, string][] = [];
 
     for (const manual of existingManuals) {
@@ -11425,7 +11352,6 @@ export class MarketDatabase extends Dexie {
     }
 
     if (moexDividends.length > 0) {
-      // Идеальное сохранение: bulkPut на составной ключ строго ПЕРЕЗАПИСЫВАЕТ данные
       await this.dividends.bulkPut(moexDividends);
     }
   }
@@ -11434,25 +11360,32 @@ export class MarketDatabase extends Dexie {
     return await this.dividends.filter(d => !!d.isManual).toArray();
   }
 
+  // Очистка ТОЛЬКО акций (Исключая MCFTR и фонды)
   async clearStockPricesOnly() {
-    await this.prices.filter(p => p.ticker !== 'MCFTR' && p.ticker !== 'LQDT').delete();
-    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !m.key.includes('LQDT')).delete();
+    await this.prices.filter(p => p.ticker !== 'MCFTR' && !KNOWN_FUNDS.includes(p.ticker)).delete();
+    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !KNOWN_FUNDS.some(f => m.key.includes(f))).delete();
   }
+  
+  // ИСПРАВЛЕНИЕ: Очистка ВСЕХ фондов ликвидности
   async clearFundPricesOnly() {
-    await this.prices.where('ticker').equals('LQDT').delete();
+    await this.prices.filter(p => KNOWN_FUNDS.includes(p.ticker)).delete();
   }
+  
   async clearIndicesOnly() {
     await this.prices.where('ticker').equals('MCFTR').delete();
   }
+  
   async clearDividendsOnly() {
     await this.dividends.clear();
     await this.meta.filter(m => m.key.startsWith('DIV_')).delete();
   }
+  
   async clearAllCache() {
     await this.prices.clear();
     await this.dividends.clear();
     await this.meta.clear();
   }
+  
   async getCacheStats() {
     return { pricesCount: await this.prices.count(), dividendsCount: await this.dividends.count() };
   }
@@ -11483,36 +11416,23 @@ FILE 31/50
 PATH: stock-analyzer/src/engine/DateTimeStandardizer.ts
 ---
 export class DateTimeStandardizer {
-  /**
-   * Округляет локальную дату до часа (минуты, секунды и мс сбрасываются в 0)
-   */
   static truncateToHour(date: Date): Date {
     const d = new Date(date);
     d.setMinutes(0, 0, 0);
     return d;
   }
 
-  /**
-   * Преобразует локальную дату в ISO UTC строку (для хранения в БД)
-   */
   static toUTCISOString(localDate: Date): string {
     const truncated = this.truncateToHour(localDate);
     return truncated.toISOString();
   }
 
-  /**
-   * Преобразует ISO UTC строку в формат YYYY-MM-DD для API Мосбиржи (по МСК времени)
-   */
   static toMSKDateString(utcIsoString: string): string {
     const d = new Date(utcIsoString);
-    // Сдвиг к Московскому времени (UTC+3)
     const mskTime = new Date(d.getTime() + 3 * 60 * 60 * 1000);
     return mskTime.toISOString().split('T')[0];
   }
 
-  /**
-   * Преобразует ISO UTC строку в понятное пользователю локальное отображение (YYYY-MM-DD HH:00)
-   */
   static formatToLocalDisplay(utcIsoString: string): string {
     const d = new Date(utcIsoString);
     const year = d.getFullYear();
@@ -11520,6 +11440,24 @@ export class DateTimeStandardizer {
     const day = String(d.getDate()).padStart(2, '0');
     const hours = String(d.getHours()).padStart(2, '0');
     return `${year}-${month}-${day} ${hours}:00`;
+  }
+
+  static getUTCMonthEndNoShift(year: number, monthIndex: number): Date {
+    return new Date(Date.UTC(year, monthIndex + 1, 0, 12, 0, 0));
+  }
+
+  /**
+   * Возвращает строку для <input type="datetime-local"> 
+   * строго в локальном часовом поясе устройства (с округлением до часов).
+   */
+  static getLocalDatetimeLocalString(dateOverride?: string): string {
+    const d = dateOverride ? new Date(dateOverride) : new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:00`;
   }
 }
 
@@ -11725,27 +11663,30 @@ import { PortfolioCalculationService, ICalculatedPortfolio } from '../services/e
 import { usePortfolioStore } from '../store/usePortfolioStore';
 
 export function usePortfolioCalculation(portfolio: IPortfolio) {
-  const { calculationsCache, setCalculationCache } = usePortfolioStore();
+  const { settings, calculationsCache, setCalculationCache } = usePortfolioStore();
   
-  // Если портфель уже был рассчитан и лежит в глобальном кэше — сразу отдаем его
-  const cachedResult: ICalculatedPortfolio | null = calculationsCache[portfolio.id] || null;
+  const currentHour = new Date().getHours(); // Текущий локальный час
+  const cachedWrapper = calculationsCache[portfolio.id];
+
+  // Проверяем валидность кэша: есть ли он, и совпадает ли час расчета с текущим
+  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentHour;
   
-  // Если кэша нет — показываем загрузку
-  const [loading, setLoading] = useState<boolean>(!cachedResult);
+  const cachedResult: ICalculatedPortfolio | null = isCacheValid ? cachedWrapper.result : null;
+  const [loading, setLoading] = useState<boolean>(!isCacheValid);
 
   useEffect(() => {
-    // Если результат уже есть в кэше — не делаем ничего
-    if (calculationsCache[portfolio.id]) {
+    if (isCacheValid) {
+      setLoading(false);
       return;
     }
 
     let isMounted = true;
     setLoading(true);
 
-    PortfolioCalculationService.calculatePortfolio(portfolio)
+    PortfolioCalculationService.calculatePortfolio(portfolio, settings)
       .then(res => {
         if (isMounted) {
-          setCalculationCache(portfolio.id, res);
+          setCalculationCache(portfolio.id, res, currentHour);
           setLoading(false);
         }
       })
@@ -11759,7 +11700,7 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     return () => {
       isMounted = false;
     };
-  }, [portfolio, calculationsCache, setCalculationCache]);
+  }, [portfolio, settings, isCacheValid, currentHour, setCalculationCache]);
 
   return { 
     result: cachedResult, 
@@ -11854,24 +11795,17 @@ export interface IMoexPriceResult {
 }
 
 export class MoexApiGateway {
-  /**
-   * Получает динамический индекс колонки по её названию
-   */
   private static getColumnIndex(columns: string[], columnName: string): number {
     return columns.findIndex(col => col.toUpperCase() === columnName.toUpperCase());
   }
 
-  /**
-   * Загружает цену закрытия акции или фонда на заданную дату (или ближайшую прошлую торговую сессию)
-   */
   static async fetchClosePrice(
     ticker: string,
     mskDateString: string
   ): Promise<IMoexPriceResult | null> {
     try {
-      // Использование iss.reverse=true отдает свечи до указанной даты в обратном порядке.
-      // Первая свеча в массиве — это последняя доступная торговая сессия на/до указанной даты!
-      const url = `${BASE_URL}/engines/stock/markets/shares/securities/${ticker.toUpperCase()}/candles.json?iss.reverse=true&till=${mskDateString} 23:59:59&interval=24&marketprice_board=1`;
+      // ИСПРАВЛЕНИЕ: Экранируем пробел перед временем (%20)
+      const url = `${BASE_URL}/engines/stock/markets/shares/securities/${ticker.toUpperCase()}/candles.json?iss.reverse=true&till=${mskDateString}%2023:59:59&interval=24&marketprice_board=1`;
       
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
@@ -11888,7 +11822,7 @@ export class MoexApiGateway {
 
       const firstCandle = candles.data[0];
       const rawPrice = firstCandle[closeIdx];
-      const rawDateStr = firstCandle[endIdx]; // 'YYYY-MM-DD HH:mm:ss'
+      const rawDateStr = firstCandle[endIdx];
 
       const price = typeof rawPrice === 'string' ? parseFloat(rawPrice.replace(',', '.')) : Number(rawPrice);
       const tradeDate = rawDateStr.split(' ')[0];
@@ -11900,9 +11834,6 @@ export class MoexApiGateway {
     }
   }
 
-  /**
-   * Загружает исторические значения индекса MCFTR за выбранную дату
-   */
   static async fetchMCFTRIndex(
     fromMskDate: string,
     tillMskDate: string
@@ -11923,7 +11854,6 @@ export class MoexApiGateway {
       const closeIdx = this.getColumnIndex(history.columns, 'CLOSE');
       const dateIdx = this.getColumnIndex(history.columns, 'TRADEDATE');
 
-      // Берём последнюю доступную запись из массива за этот период
       const lastRow = history.data[history.data.length - 1];
       const rawPrice = lastRow[closeIdx];
       const tradeDate = String(lastRow[dateIdx]);
@@ -11937,9 +11867,6 @@ export class MoexApiGateway {
     }
   }
 
-  /**
-   * Загружает историю дивидендов по тикеру (Строго в валюте RUB, без валютных дубликатов ГДР)
-   */
   static async fetchDividends(ticker: string): Promise<IDividendHistory[]> {
     try {
       const url = `${BASE_URL}/securities/${ticker.toUpperCase()}/dividends.json`;
@@ -11958,7 +11885,6 @@ export class MoexApiGateway {
       const valueIdx = this.getColumnIndex(dividends.columns, 'value');
       const currencyIdx = this.getColumnIndex(dividends.columns, 'currencyid');
 
-      // Карта дедупликации по дате (сохраняет только рублевую выплату)
       const resultsMap = new Map<string, IDividendHistory>();
 
       for (const row of dividends.data) {
@@ -11966,7 +11892,6 @@ export class MoexApiGateway {
         const rawValue = row[valueIdx];
         const currency = currencyIdx !== -1 ? String(row[currencyIdx]).toUpperCase() : 'RUB';
 
-        // ИГНОРИРУЕМ USD/EUR ГДР-дубликаты! Берем только RUB / SUR / RUR
         if (currency === 'RUB' || currency === 'SUR' || currency === 'RUR' || currency === '') {
           const value = typeof rawValue === 'string' ? parseFloat(rawValue.replace(',', '.')) : Number(rawValue);
 
@@ -11993,12 +11918,11 @@ export class MoexApiGateway {
 FILE 40/50
 PATH: stock-analyzer/src/services/engine/PortfolioCalculationService.ts
 ---
-import { IPortfolio, AssetType } from '../../types/domain';
+import { IPortfolio, AssetType, IGlobalSettings, IAssetAllocation } from '../../types/domain';
 import { MarketDataSyncService } from '../sync/MarketDataSyncService';
 import { FinancialMath } from '../../engine/FinancialMath';
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { TickerResolver } from '../../engine/TickerResolver';
-import { UserStorage } from '../storage/userStorage';
 
 export interface ICalculatedAsset {
   ticker: string;
@@ -12081,32 +12005,181 @@ export interface ICalculatedPortfolio {
   error: string | null;
 }
 
+interface ISubPeriodResult {
+  assets: ICalculatedAsset[];
+  freeCashWeight: number;
+  lqdtStartPrice: number;
+  lqdtFinishPrice: number;
+  lqdtProfitPercent: number;
+  mcftrStartPrice: number;
+  mcftrFinishPrice: number;
+  mcftrProfitPercent: number;
+  portfolioProfitPercent: number;
+}
+
 export class PortfolioCalculationService {
+  
+  /**
+   * Находит все даты завершения месяцев между start и end в 12:00:00 UTC
+   */
   private static getMonthEndDatesBetween(startIso: string, endIso: string): string[] {
     const result: string[] = [];
     const start = new Date(startIso);
     const end = new Date(endIso);
-    let current = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 0, 0));
+
+    let current = DateTimeStandardizer.getUTCMonthEndNoShift(start.getUTCFullYear(), start.getUTCMonth());
 
     while (current.getTime() < end.getTime()) {
       if (current.getTime() > start.getTime()) {
         result.push(current.toISOString());
       }
-      current = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 2, 0, 23, 0, 0));
+      current = DateTimeStandardizer.getUTCMonthEndNoShift(current.getUTCFullYear(), current.getUTCMonth() + 1);
     }
     return result;
+  }
+
+  /**
+   * ЯДРО: Изолированный расчёт одного суб-интервала с ПАРАЛЛЕЛЬНОЙ загрузкой данных
+   */
+  private static async _calculateSubPeriodReturns(
+    assets: IAssetAllocation[],
+    startIso: string,
+    finishIso: string,
+    settings: IGlobalSettings
+  ): Promise<ISubPeriodResult> {
+    const taxRate = settings.dividendTaxRate ?? 15;
+    const customRenames = settings.tickerRenames || [];
+    const customSplits = settings.stockSplits || [];
+
+    const calculatedAssets: ICalculatedAsset[] = [];
+    let totalAllocatedWeight = 0;
+    let portfolioProfitPercent = 0;
+
+    // ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ВСЕХ АКТИВОВ ТОЧКИ
+    const assetPromises = assets.map(async (asset) => {
+      const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
+      const startResolved = TickerResolver.resolveTicker(asset.ticker, startIso, customRenames);
+      const finishResolved = TickerResolver.resolveTicker(asset.ticker, finishIso, customRenames);
+      
+      const pStartRes = MarketDataSyncService.getOrFetchPrice(startResolved, startIso);
+      const pFinishRes = MarketDataSyncService.getOrFetchPrice(finishResolved, finishIso);
+      
+      // Запускаем запросы цен параллельно
+      const [pStart, pFinish] = await Promise.all([pStartRes, pFinishRes]);
+
+      const startPriceRaw = pStart?.price || 0;
+      const finishPriceRaw = pFinish?.price || 0;
+
+      const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, startIso, customRenames, customSplits);
+      const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, finishIso, customRenames, customSplits);
+
+      const startPrice = startPriceRaw > 0 ? startPriceRaw / p1Coef : 0;
+      const finishPrice = finishPriceRaw > 0 ? finishPriceRaw / p2Coef : 0;
+
+      let rawDividends = 0;
+      let netDividends = 0;
+
+      if (asset.type === 'STOCK' && startPrice > 0) {
+        const divsStartRes = MarketDataSyncService.getOrFetchDividends(startResolved);
+        const divsFinishRes = startResolved !== finishResolved 
+          ? MarketDataSyncService.getOrFetchDividends(finishResolved) 
+          : Promise.resolve([]);
+        
+        const [divsStart, divsFinish] = await Promise.all([divsStartRes, divsFinishRes]);
+        const allD = [...divsStart, ...divsFinish];
+        const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
+
+        const d1 = DateTimeStandardizer.toMSKDateString(startIso);
+        const d2 = DateTimeStandardizer.toMSKDateString(finishIso);
+        const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
+        
+        for (const d of periodDivs) {
+          const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
+          rawDividends += (Number(d.value) / divCoef);
+        }
+        netDividends = rawDividends * (1 - taxRate / 100);
+      }
+
+      const profitPercent = startPrice > 0 
+        ? FinancialMath.calculateStockProfit(startPrice, finishPrice, rawDividends, taxRate)
+        : 0;
+
+      return {
+        ticker: asset.ticker,
+        resolvedTicker: startResolved === finishResolved ? startResolved : `${startResolved} → ${finishResolved}`,
+        weight: asset.weight,
+        type: asset.type,
+        startPrice: Number(startPrice.toFixed(2)),
+        finishPrice: Number(finishPrice.toFixed(2)),
+        rawDividends: Number(rawDividends.toFixed(2)),
+        netDividends: Number(netDividends.toFixed(2)),
+        profitPercent: Number(profitPercent.toFixed(2)),
+      };
+    });
+
+    const resolvedAssets = await Promise.all(assetPromises);
+
+    for (const ca of resolvedAssets) {
+      calculatedAssets.push(ca);
+      totalAllocatedWeight += Number(ca.weight) || 0;
+      portfolioProfitPercent += ca.profitPercent * (ca.weight / 100);
+    }
+
+    // РАСЧЕТ LQDT И MCFTR ПАРАЛЛЕЛЬНО
+    const freeCashWeight = Math.max(0, Math.round((100 - totalAllocatedWeight) * 100) / 100);
+    let lqdtStartPrice = 0;
+    let lqdtFinishPrice = 0;
+    let lqdtProfitPercent = 0;
+
+    let mcftrStartPrice = 0;
+    let mcftrFinishPrice = 0;
+    let mcftrProfitPercent = 0;
+
+    const basePromises = [];
+    basePromises.push(MarketDataSyncService.getOrFetchMCFTR(startIso));
+    basePromises.push(MarketDataSyncService.getOrFetchMCFTR(finishIso));
+
+    if (freeCashWeight > 0) {
+      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', startIso));
+      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', finishIso));
+    }
+
+    const baseResults = await Promise.all(basePromises);
+    
+    mcftrStartPrice = baseResults[0]?.price || 0;
+    mcftrFinishPrice = baseResults[1]?.price || 0;
+    if (mcftrStartPrice > 0) {
+      mcftrProfitPercent = ((mcftrFinishPrice - mcftrStartPrice) / mcftrStartPrice) * 100;
+    }
+
+    if (freeCashWeight > 0) {
+      lqdtStartPrice = baseResults[2]?.price || 0;
+      lqdtFinishPrice = baseResults[3]?.price || 0;
+      if (lqdtStartPrice > 0) {
+        lqdtProfitPercent = ((lqdtFinishPrice - lqdtStartPrice) / lqdtStartPrice) * 100;
+        portfolioProfitPercent += lqdtProfitPercent * (freeCashWeight / 100);
+      }
+    }
+
+    return {
+      assets: calculatedAssets,
+      freeCashWeight,
+      lqdtStartPrice,
+      lqdtFinishPrice,
+      lqdtProfitPercent,
+      mcftrStartPrice,
+      mcftrFinishPrice,
+      mcftrProfitPercent,
+      portfolioProfitPercent
+    };
   }
 
   static async calculateChartCurveForRange(
     portfolio: IPortfolio,
     rangeStartIso: string,
-    rangeFinishIso: string
+    rangeFinishIso: string,
+    settings: IGlobalSettings
   ): Promise<IEquityChartPoint[]> {
-    const savedTax = UserStorage.getSettings().dividendTaxRate;
-    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
-    const customRenames = UserStorage.getSettings().tickerRenames || [];
-    const customSplits = UserStorage.getSettings().stockSplits || [];
-
     if (!portfolio.milestones || portfolio.milestones.length === 0) return [];
 
     const milestonesAsc = [...portfolio.milestones].sort(
@@ -12144,78 +12217,18 @@ export class PortfolioCalculationService {
       const subStartIso = allTimelineDates[i];
       const subFinishIso = allTimelineDates[i + 1];
       const subStartTime = new Date(subStartIso).getTime();
+      
       let activeMs = milestonesAsc[0];
-
       for (const ms of milestonesAsc) {
-        if (new Date(ms.date).getTime() <= subStartTime) {
-          activeMs = ms;
-        } else {
-          break;
-        }
+        if (new Date(ms.date).getTime() <= subStartTime) activeMs = ms;
+        else break;
       }
 
-      let subWeightedProfit = 0;
-      let subTotalWeight = 0;
+      const res = await this._calculateSubPeriodReturns(activeMs.assets, subStartIso, subFinishIso, settings);
 
-      for (const asset of activeMs.assets) {
-        const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
-        const startResolved = TickerResolver.resolveTicker(asset.ticker, subStartIso, customRenames);
-        const finishResolved = TickerResolver.resolveTicker(asset.ticker, subFinishIso, customRenames);
-        
-        subTotalWeight += Number(asset.weight) || 0;
+      cumPortfolioMult *= (1 + res.portfolioProfitPercent / 100);
+      cumMcftrMult *= (1 + res.mcftrProfitPercent / 100);
 
-        const pStart = await MarketDataSyncService.getOrFetchPrice(startResolved, subStartIso);
-        const pFinish = await MarketDataSyncService.getOrFetchPrice(finishResolved, subFinishIso);
-
-        const p1Raw = pStart?.price || 0;
-        const p2Raw = pFinish?.price || 0;
-
-        const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, subStartIso, customRenames, customSplits);
-        const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, subFinishIso, customRenames, customSplits);
-
-        const p1 = p1Raw > 0 ? p1Raw / p1Coef : 0;
-        const p2 = p2Raw > 0 ? p2Raw / p2Coef : 0;
-
-        if (p1 > 0) {
-          let divs = 0;
-          if (asset.type === 'STOCK') {
-            const divsStart = await MarketDataSyncService.getOrFetchDividends(startResolved);
-            const divsFinish = startResolved !== finishResolved ? await MarketDataSyncService.getOrFetchDividends(finishResolved) : [];
-            const allD = [...divsStart, ...divsFinish];
-            const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
-
-            const d1 = DateTimeStandardizer.toMSKDateString(subStartIso);
-            const d2 = DateTimeStandardizer.toMSKDateString(subFinishIso);
-            const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
-            
-            for (const d of periodDivs) {
-              const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
-              divs += (Number(d.value) / divCoef);
-            }
-            divs = divs * (1 - taxRate / 100);
-          }
-          const pPct = ((p2 + divs - p1) / p1) * 100;
-          subWeightedProfit += pPct * (asset.weight / 100);
-        }
-      }
-
-      const freeCashW = Math.max(0, Math.round((100 - subTotalWeight) * 100) / 100);
-      if (freeCashW > 0) {
-        const l1 = await MarketDataSyncService.getOrFetchPrice('LQDT', subStartIso);
-        const l2 = await MarketDataSyncService.getOrFetchPrice('LQDT', subFinishIso);
-        if (l1?.price && l2?.price && l1.price > 0) {
-          subWeightedProfit += (((l2.price - l1.price) / l1.price) * 100) * (freeCashW / 100);
-        }
-      }
-
-      const m1 = await MarketDataSyncService.getOrFetchMCFTR(subStartIso);
-      const m2 = await MarketDataSyncService.getOrFetchMCFTR(subFinishIso);
-      if (m1?.price && m2?.price && m1.price > 0) {
-        const subMcftrPct = ((m2.price - m1.price) / m1.price) * 100;
-        cumMcftrMult *= (1 + subMcftrPct / 100);
-      }
-
-      cumPortfolioMult *= (1 + subWeightedProfit / 100);
       const cumP = (cumPortfolioMult - 1) * 100;
       const cumM = (cumMcftrMult - 1) * 100;
 
@@ -12236,12 +12249,7 @@ export class PortfolioCalculationService {
     return chartPoints;
   }
 
-  static async calculatePortfolio(portfolio: IPortfolio): Promise<ICalculatedPortfolio> {
-    const savedTax = UserStorage.getSettings().dividendTaxRate;
-    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
-    const customRenames = UserStorage.getSettings().tickerRenames || [];
-    const customSplits = UserStorage.getSettings().stockSplits || [];
-
+  static async calculatePortfolio(portfolio: IPortfolio, settings: IGlobalSettings): Promise<ICalculatedPortfolio> {
     if (!portfolio.milestones || portfolio.milestones.length === 0) {
       return this.getEmptyResult(portfolio.id);
     }
@@ -12264,102 +12272,12 @@ export class PortfolioCalculationService {
     for (let i = 0; i < milestonesAsc.length; i++) {
       const currentMs = milestonesAsc[i];
       const msStartIso = currentMs.date;
-      let msFinishIso = finishDateIso;
-      if (i + 1 < milestonesAsc.length) {
-        msFinishIso = milestonesAsc[i + 1].date;
-      }
+      const msFinishIso = (i + 1 < milestonesAsc.length) ? milestonesAsc[i + 1].date : finishDateIso;
 
-      const msStartDate = new Date(msStartIso);
-      const msFinishDate = new Date(msFinishIso);
-      const durationHours = Math.max(1, Math.round((msFinishDate.getTime() - msStartDate.getTime()) / (1000 * 60 * 60)));
+      const durationHours = Math.max(1, Math.round((new Date(msFinishIso).getTime() - new Date(msStartIso).getTime()) / (1000 * 60 * 60)));
       const durationDays = Math.round(durationHours / 24);
 
-      const calculatedAssets: ICalculatedAsset[] = [];
-      let totalAllocatedWeight = 0;
-      let msWeightedProfitSum = 0;
-
-      for (const asset of currentMs.assets) {
-        const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
-        const startResolved = TickerResolver.resolveTicker(asset.ticker, msStartIso, customRenames);
-        const finishResolved = TickerResolver.resolveTicker(asset.ticker, msFinishIso, customRenames);
-        
-        totalAllocatedWeight += Number(asset.weight) || 0;
-
-        const startRes = await MarketDataSyncService.getOrFetchPrice(startResolved, msStartIso);
-        const finishRes = await MarketDataSyncService.getOrFetchPrice(finishResolved, msFinishIso);
-
-        const startPriceRaw = startRes?.price || 0;
-        const finishPriceRaw = finishRes?.price || 0;
-
-        const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, msStartIso, customRenames, customSplits);
-        const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, msFinishIso, customRenames, customSplits);
-
-        const startPrice = startPriceRaw > 0 ? startPriceRaw / p1Coef : 0;
-        const finishPrice = finishPriceRaw > 0 ? finishPriceRaw / p2Coef : 0;
-
-        let rawDividends = 0;
-        let netDividends = 0;
-
-        if (asset.type === 'STOCK') {
-          const divsStart = await MarketDataSyncService.getOrFetchDividends(startResolved);
-          const divsFinish = startResolved !== finishResolved ? await MarketDataSyncService.getOrFetchDividends(finishResolved) : [];
-          const allD = [...divsStart, ...divsFinish];
-          const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
-
-          const d1 = DateTimeStandardizer.toMSKDateString(msStartIso);
-          const d2 = DateTimeStandardizer.toMSKDateString(msFinishIso);
-          const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
-          
-          for (const d of periodDivs) {
-            const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
-            rawDividends += (Number(d.value) / divCoef);
-          }
-          netDividends = rawDividends * (1 - taxRate / 100);
-        }
-
-        const profitPercent = startPrice > 0 
-          ? FinancialMath.calculateStockProfit(startPrice, finishPrice, rawDividends, taxRate)
-          : 0;
-
-        calculatedAssets.push({
-          ticker: asset.ticker,
-          resolvedTicker: startResolved === finishResolved ? startResolved : `${startResolved} → ${finishResolved}`,
-          weight: asset.weight,
-          type: asset.type,
-          startPrice: Number(startPrice.toFixed(2)),
-          finishPrice: Number(finishPrice.toFixed(2)),
-          rawDividends: Number(rawDividends.toFixed(2)),
-          netDividends: Number(netDividends.toFixed(2)),
-          profitPercent: Number(profitPercent.toFixed(2)),
-        });
-
-        msWeightedProfitSum += profitPercent * (asset.weight / 100);
-      }
-
-      const freeCashWeight = Math.max(0, Math.round((100 - totalAllocatedWeight) * 100) / 100);
-      let lqdtStartPrice = 0;
-      let lqdtFinishPrice = 0;
-      let lqdtProfitPercent = 0;
-
-      if (freeCashWeight > 0) {
-        const lqdtStart = await MarketDataSyncService.getOrFetchPrice('LQDT', msStartIso);
-        const lqdtFinish = await MarketDataSyncService.getOrFetchPrice('LQDT', msFinishIso);
-        lqdtStartPrice = lqdtStart?.price || 0;
-        lqdtFinishPrice = lqdtFinish?.price || 0;
-        if (lqdtStartPrice > 0) {
-          lqdtProfitPercent = ((lqdtFinishPrice - lqdtStartPrice) / lqdtStartPrice) * 100;
-          msWeightedProfitSum += lqdtProfitPercent * (freeCashWeight / 100);
-        }
-      }
-
-      const m1 = await MarketDataSyncService.getOrFetchMCFTR(msStartIso);
-      const m2 = await MarketDataSyncService.getOrFetchMCFTR(msFinishIso);
-      const mcftrStartPrice = m1?.price || 0;
-      const mcftrFinishPrice = m2?.price || 0;
-      let mcftrProfitPercent = 0;
-      if (mcftrStartPrice > 0) {
-        mcftrProfitPercent = ((mcftrFinishPrice - mcftrStartPrice) / mcftrStartPrice) * 100;
-      }
+      const res = await this._calculateSubPeriodReturns(currentMs.assets, msStartIso, msFinishIso, settings);
 
       calculatedMilestones.push({
         milestoneId: currentMs.id,
@@ -12367,22 +12285,22 @@ export class PortfolioCalculationService {
         finishDateIso: msFinishIso,
         durationHours,
         durationDays,
-        assets: calculatedAssets,
-        freeCashWeight,
-        lqdtStartPrice,
-        lqdtFinishPrice,
-        lqdtProfitPercent,
-        totalProfitPercent: msWeightedProfitSum,
-        mcftrStartPrice,
-        mcftrFinishPrice,
-        mcftrProfitPercent,
-        mcftrAlphaPercent: msWeightedProfitSum - mcftrProfitPercent,
+        assets: res.assets,
+        freeCashWeight: res.freeCashWeight,
+        lqdtStartPrice: res.lqdtStartPrice,
+        lqdtFinishPrice: res.lqdtFinishPrice,
+        lqdtProfitPercent: res.lqdtProfitPercent,
+        totalProfitPercent: res.portfolioProfitPercent,
+        mcftrStartPrice: res.mcftrStartPrice,
+        mcftrFinishPrice: res.mcftrFinishPrice,
+        mcftrProfitPercent: res.mcftrProfitPercent,
+        mcftrAlphaPercent: res.portfolioProfitPercent - res.mcftrProfitPercent,
       });
 
-      milestoneReturns.push(msWeightedProfitSum);
+      milestoneReturns.push(res.portfolioProfitPercent);
     }
 
-    const chartPoints = await this.calculateChartCurveForRange(portfolio, startDateIso, finishDateIso);
+    const chartPoints = await this.calculateChartCurveForRange(portfolio, startDateIso, finishDateIso, settings);
 
     const totalProfitPercent = FinancialMath.calculateCompoundReturn(milestoneReturns);
     const monthlyReturnPercent = FinancialMath.calculateMonthlyRate(totalProfitPercent, totalDays);
@@ -12390,10 +12308,13 @@ export class PortfolioCalculationService {
 
     const mcftrStart = await MarketDataSyncService.getOrFetchMCFTR(startDateIso);
     const mcftrFinish = await MarketDataSyncService.getOrFetchMCFTR(finishDateIso);
+    
     let mcftrMonthlyReturnPercent = 0;
+    let mcftrTotalProfitPercent = 0;
+    
     if (mcftrStart?.price && mcftrFinish?.price && mcftrStart.price > 0) {
-      const mcftrTotal = ((mcftrFinish.price - mcftrStart.price) / mcftrStart.price) * 100;
-      mcftrMonthlyReturnPercent = FinancialMath.calculateMonthlyRate(mcftrTotal, totalDays);
+      mcftrTotalProfitPercent = ((mcftrFinish.price - mcftrStart.price) / mcftrStart.price) * 100;
+      mcftrMonthlyReturnPercent = FinancialMath.calculateMonthlyRate(mcftrTotalProfitPercent, totalDays);
     }
 
     const alphaMonthlyPercent = FinancialMath.calculateAlpha(monthlyReturnPercent, mcftrMonthlyReturnPercent);
@@ -12414,7 +12335,7 @@ export class PortfolioCalculationService {
       annualizedReturnPercent,
       mcftrStartPrice: mcftrStart?.price || 0,
       mcftrFinishPrice: mcftrFinish?.price || 0,
-      mcftrTotalProfitPercent: 0,
+      mcftrTotalProfitPercent,
       mcftrMonthlyReturnPercent,
       alphaMonthlyPercent,
       performanceColor,
@@ -12423,12 +12344,7 @@ export class PortfolioCalculationService {
     };
   }
 
-  static async calculateMonthlyReturnsMatrix(portfolio: IPortfolio): Promise<IMonthlyMatrixRow[]> {
-    const savedTax = UserStorage.getSettings().dividendTaxRate;
-    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
-    const customRenames = UserStorage.getSettings().tickerRenames || [];
-    const customSplits = UserStorage.getSettings().stockSplits || [];
-
+  static async calculateMonthlyReturnsMatrix(portfolio: IPortfolio, settings: IGlobalSettings): Promise<IMonthlyMatrixRow[]> {
     if (!portfolio.milestones || portfolio.milestones.length === 0) return [];
 
     const milestonesAsc = [...portfolio.milestones].sort(
@@ -12452,8 +12368,9 @@ export class PortfolioCalculationService {
       const yearMcftrReturns: number[] = [];
 
       for (let m = 0; m < 12; m++) {
-        const firstDayOfMonth = new Date(Date.UTC(yr, m, 1, 0, 0, 0));
-        const lastDayOfMonth = new Date(Date.UTC(yr, m + 1, 0, 23, 0, 0));
+        // Концы месяцев строим через полдень UTC
+        const firstDayOfMonth = DateTimeStandardizer.getUTCMonthEndNoShift(yr, m - 1);
+        const lastDayOfMonth = DateTimeStandardizer.getUTCMonthEndNoShift(yr, m);
 
         if (lastDayOfMonth.getTime() < startDate.getTime() || firstDayOfMonth.getTime() > finishDate.getTime()) {
           cells.push({
@@ -12469,72 +12386,17 @@ export class PortfolioCalculationService {
         const calcStartIso = DateTimeStandardizer.toUTCISOString(calcStart);
         const calcFinishIso = DateTimeStandardizer.toUTCISOString(calcFinish);
 
+        const calcStartTime = calcStart.getTime();
         let activeMs = milestonesAsc[0];
         for (const ms of milestonesAsc) {
-          if (new Date(ms.date).getTime() <= calcStart.getTime()) activeMs = ms;
+          if (new Date(ms.date).getTime() <= calcStartTime) activeMs = ms;
           else break;
         }
 
-        let subWeightedProfit = 0;
-        let subTotalWeight = 0;
+        const res = await this._calculateSubPeriodReturns(activeMs.assets, calcStartIso, calcFinishIso, settings);
 
-        for (const asset of activeMs.assets) {
-          const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
-          const startResolved = TickerResolver.resolveTicker(asset.ticker, calcStartIso, customRenames);
-          const finishResolved = TickerResolver.resolveTicker(asset.ticker, calcFinishIso, customRenames);
-          
-          subTotalWeight += Number(asset.weight) || 0;
-
-          const pStart = await MarketDataSyncService.getOrFetchPrice(startResolved, calcStartIso);
-          const pFinish = await MarketDataSyncService.getOrFetchPrice(finishResolved, calcFinishIso);
-
-          const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, calcStartIso, customRenames, customSplits);
-          const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, calcFinishIso, customRenames, customSplits);
-
-          const p1 = pStart?.price ? pStart.price / p1Coef : 0;
-          const p2 = pFinish?.price ? pFinish.price / p2Coef : 0;
-
-          if (p1 > 0) {
-            let divs = 0;
-            if (asset.type === 'STOCK') {
-              const divsStart = await MarketDataSyncService.getOrFetchDividends(startResolved);
-              const divsFinish = startResolved !== finishResolved ? await MarketDataSyncService.getOrFetchDividends(finishResolved) : [];
-              const allD = [...divsStart, ...divsFinish];
-              const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
-
-              const d1 = DateTimeStandardizer.toMSKDateString(calcStartIso);
-              const d2 = DateTimeStandardizer.toMSKDateString(calcFinishIso);
-              const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
-              
-              for (const d of periodDivs) {
-                const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
-                divs += (Number(d.value) / divCoef);
-              }
-              divs = divs * (1 - taxRate / 100);
-            }
-            const pPct = ((p2 + divs - p1) / p1) * 100;
-            subWeightedProfit += pPct * (asset.weight / 100);
-          }
-        }
-
-        const freeCashW = Math.max(0, Math.round((100 - subTotalWeight) * 100) / 100);
-        if (freeCashW > 0) {
-          const l1 = await MarketDataSyncService.getOrFetchPrice('LQDT', calcStartIso);
-          const l2 = await MarketDataSyncService.getOrFetchPrice('LQDT', calcFinishIso);
-          if (l1?.price && l2?.price && l1.price > 0) {
-            subWeightedProfit += (((l2.price - l1.price) / l1.price) * 100) * (freeCashW / 100);
-          }
-        }
-
-        const m1 = await MarketDataSyncService.getOrFetchMCFTR(calcStartIso);
-        const m2 = await MarketDataSyncService.getOrFetchMCFTR(calcFinishIso);
-        let subMcftrPct = 0;
-        if (m1?.price && m2?.price && m1.price > 0) {
-          subMcftrPct = ((m2.price - m1.price) / m1.price) * 100;
-        }
-
-        const mPortfolioRet = Number(subWeightedProfit.toFixed(2));
-        const mMcftrRet = Number(subMcftrPct.toFixed(2));
+        const mPortfolioRet = Number(res.portfolioProfitPercent.toFixed(2));
+        const mMcftrRet = Number(res.mcftrProfitPercent.toFixed(2));
         const mAlpha = Number((mPortfolioRet - mMcftrRet).toFixed(2));
 
         cells.push({
@@ -12580,14 +12442,9 @@ PATH: stock-analyzer/src/services/storage/filePortability.ts
 import { IExportData } from '../../types/domain';
 
 export class FilePortabilityService {
-  /**
-   * Экспортирует данные приложения в файл JSON.
-   * Использует File System Access API (на ПК) или Blob (на моб. устройствах).
-   */
   static async exportData(data: IExportData, defaultFilename = 'moex_strategies_backup.json'): Promise<boolean> {
     const jsonString = JSON.stringify(data, null, 2);
 
-    // 1. Прогрессивное улучшение: File System Access API (Chrome/Edge на ПК)
     if ('showSaveFilePicker' in window) {
       try {
         const handle = await (window as any).showSaveFilePicker({
@@ -12604,12 +12461,11 @@ export class FilePortabilityService {
         await writable.close();
         return true;
       } catch (err: any) {
-        if (err.name === 'AbortError') return false; // Пользователь отменил окно
+        if (err.name === 'AbortError') return false; 
         console.warn('File System Access API failed, falling back to Blob download:', err);
       }
     }
 
-    // 2. Кроссплатформенный фоллбэк: Blob + <a download> (Android / iOS / Firefox)
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -12623,7 +12479,7 @@ export class FilePortabilityService {
   }
 
   /**
-   * Проверяет и парсит структуру импортируемого JSON файла
+   * Проверяет и парсит структуру импортируемого JSON файла со строгой валидацией
    */
   static parseImportFile(jsonString: string): IExportData {
     let parsed: any;
@@ -12643,6 +12499,32 @@ export class FilePortabilityService {
 
     if (!Array.isArray(parsed.portfolios)) {
       throw new Error('Файл не содержит списка портфелей');
+    }
+
+    // Жесткая валидация структуры портфелей и весов активов
+    for (const port of parsed.portfolios) {
+      if (!port.id || !port.name) {
+        throw new Error('Один из портфелей не содержит ID или Имени');
+      }
+      if (Array.isArray(port.milestones)) {
+        for (const ms of port.milestones) {
+          if (!ms.id || !ms.date) throw new Error(`Контрольная точка портфеля ${port.name} повреждена`);
+          
+          if (Array.isArray(ms.assets)) {
+            let totalWeight = 0;
+            for (const asset of ms.assets) {
+              if (!asset.ticker || typeof asset.weight !== 'number') {
+                throw new Error(`Актив в портфеле ${port.name} поврежден`);
+              }
+              totalWeight += asset.weight;
+            }
+            // Защита от измененных вручную файлов с перевесом
+            if (totalWeight > 100.001) {
+              throw new Error(`Сумма долей активов в портфеле "${port.name}" превышает 100% (${totalWeight}%)`);
+            }
+          }
+        }
+      }
     }
 
     return parsed as IExportData;
@@ -12835,9 +12717,19 @@ PATH: stock-analyzer/src/store/usePortfolioStore.ts
 import { create } from 'zustand';
 import { IPortfolio, IPortfolioGroup, IMilestone, IGlobalSettings, IExportData, ITickerRename, IStockSplit } from '../types/domain';
 import { UserStorage, DEFAULT_SETTINGS } from '../services/storage/userStorage';
-import { ICalculatedPortfolio } from '../services/engine/PortfolioCalculationService';
+import { ICalculatedPortfolio, IMonthlyMatrixRow } from '../services/engine/PortfolioCalculationService';
 
 const GROUPS_STORAGE_KEY = 'app_user_groups';
+
+export interface ICachedCalculation {
+  calculatedAtHour: number;
+  result: ICalculatedPortfolio;
+}
+
+export interface ICachedMatrix {
+  calculatedAtHour: number;
+  result: IMonthlyMatrixRow[];
+}
 
 interface PortfolioState {
   portfolios: IPortfolio[];
@@ -12846,8 +12738,11 @@ interface PortfolioState {
   activeGroupId: string | null;
   selectedPortfolioId: string | null;
   
-  calculationsCache: Record<string, ICalculatedPortfolio>;
-  setCalculationCache: (portfolioId: string, calcResult: ICalculatedPortfolio) => void;
+  calculationsCache: Record<string, ICachedCalculation>;
+  matrixCache: Record<string, ICachedMatrix>;
+  
+  setCalculationCache: (portfolioId: string, calcResult: ICalculatedPortfolio, currentHour: number) => void;
+  setMatrixCache: (portfolioId: string, matrixResult: IMonthlyMatrixRow[], currentHour: number) => void;
   clearCalculationCache: (portfolioId?: string) => void;
 
   loadFromStorage: () => void;
@@ -12885,23 +12780,33 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   activeGroupId: null,
   selectedPortfolioId: null,
+  
   calculationsCache: {},
+  matrixCache: {},
 
-  setCalculationCache: (portfolioId, calcResult) => {
+  setCalculationCache: (portfolioId, calcResult, currentHour) => {
     set(state => ({
-      calculationsCache: { ...state.calculationsCache, [portfolioId]: calcResult }
+      calculationsCache: { ...state.calculationsCache, [portfolioId]: { calculatedAtHour: currentHour, result: calcResult } }
+    }));
+  },
+
+  setMatrixCache: (portfolioId, matrixResult, currentHour) => {
+    set(state => ({
+      matrixCache: { ...state.matrixCache, [portfolioId]: { calculatedAtHour: currentHour, result: matrixResult } }
     }));
   },
 
   clearCalculationCache: (portfolioId) => {
     if (portfolioId) {
       set(state => {
-        const newCache = { ...state.calculationsCache };
-        delete newCache[portfolioId];
-        return { calculationsCache: newCache };
+        const newCalc = { ...state.calculationsCache };
+        const newMatrix = { ...state.matrixCache };
+        delete newCalc[portfolioId];
+        delete newMatrix[portfolioId];
+        return { calculationsCache: newCalc, matrixCache: newMatrix };
       });
     } else {
-      set({ calculationsCache: {} });
+      set({ calculationsCache: {}, matrixCache: {} });
     }
   },
 
@@ -12951,17 +12856,29 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     get().updateSettings({ stockSplits: updatedSplits });
   },
 
+  // БЕЗОПАСНОЕ ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ИМПОРТЕ
   restoreFullData: (data) => {
+    // Безопасное слияние настроек: если в файле нет каких-то полей, берем дефолтные
+    const safeSettings: IGlobalSettings = {
+      ...DEFAULT_SETTINGS,
+      ...data.settings,
+      tickerRenames: data.settings?.tickerRenames || [],
+      stockSplits: data.settings?.stockSplits || [],
+    };
+
     set({
-      settings: data.settings || DEFAULT_SETTINGS,
+      settings: safeSettings,
       groups: data.groups || [],
       portfolios: data.portfolios || [],
       selectedPortfolioId: null,
       activeGroupId: null,
     });
-    UserStorage.saveSettings(data.settings || DEFAULT_SETTINGS);
+
+    UserStorage.saveSettings(safeSettings);
     UserStorage.savePortfolios(data.portfolios || []);
     localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(data.groups || []));
+    
+    // Обязательный сброс кэшей расчетов, чтобы новые портфели пересчитались "с чистого листа"
     get().clearCalculationCache();
   },
 
