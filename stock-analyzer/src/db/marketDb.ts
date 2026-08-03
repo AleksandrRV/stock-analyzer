@@ -1,12 +1,10 @@
 import Dexie, { Table } from 'dexie';
-import { IPriceHistory, IDividendHistory, AssetType } from '../types/domain';
+import { IPriceHistory, IDividendHistory } from '../types/domain';
 
 interface ICacheMeta {
   key: string;
   lastUpdatedMs: number;
 }
-
-const KNOWN_FUNDS = ['LQDT', 'SBMM', 'AKMM', 'TRUR'];
 
 export class MarketDatabase extends Dexie {
   prices!: Table<IPriceHistory, [string, string]>;
