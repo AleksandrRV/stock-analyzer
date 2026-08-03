@@ -4,22 +4,15 @@ import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 
 interface Props {
   isOpen: boolean;
-  minDateIso: string | null; // Минимальная дата (последняя контрольная точка)
+  minDateIso: string | null; 
   onConfirm: (closedAtIso: string) => void;
   onClose: () => void;
 }
 
-export const ClosePortfolioModal: React.FC<Props> = ({
-  isOpen,
-  minDateIso,
-  onConfirm,
-  onClose,
-}) => {
-  const [localDateTime, setLocalDateTime] = useState(() => {
-    const now = new Date();
-    now.setMinutes(0, 0, 0);
-    return now.toISOString().slice(0, 13) + ':00';
-  });
+export const ClosePortfolioModal: React.FC<Props> = ({ isOpen, minDateIso, onConfirm, onClose }) => {
+  const [localDateTime, setLocalDateTime] = useState(() => 
+    DateTimeStandardizer.getLocalDatetimeLocalString()
+  );
 
   if (!isOpen) return null;
 
@@ -78,18 +71,10 @@ export const ClosePortfolioModal: React.FC<Props> = ({
           )}
 
           <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors"
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors">
               Отмена
             </button>
-            <button
-              type="submit"
-              disabled={isInvalid}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors"
-            >
+            <button type="submit" disabled={isInvalid} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
               Зафиксировать закрытие
             </button>
           </div>

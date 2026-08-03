@@ -1,9 +1,8 @@
-import { IPortfolio, AssetType } from '../../types/domain';
+import { IPortfolio, AssetType, IGlobalSettings, IAssetAllocation } from '../../types/domain';
 import { MarketDataSyncService } from '../sync/MarketDataSyncService';
 import { FinancialMath } from '../../engine/FinancialMath';
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { TickerResolver } from '../../engine/TickerResolver';
-import { UserStorage } from '../storage/userStorage';
 
 export interface ICalculatedAsset {
   ticker: string;
@@ -86,32 +85,181 @@ export interface ICalculatedPortfolio {
   error: string | null;
 }
 
+interface ISubPeriodResult {
+  assets: ICalculatedAsset[];
+  freeCashWeight: number;
+  lqdtStartPrice: number;
+  lqdtFinishPrice: number;
+  lqdtProfitPercent: number;
+  mcftrStartPrice: number;
+  mcftrFinishPrice: number;
+  mcftrProfitPercent: number;
+  portfolioProfitPercent: number;
+}
+
 export class PortfolioCalculationService {
+  
+  /**
+   * Находит все даты завершения месяцев между start и end в 12:00:00 UTC
+   */
   private static getMonthEndDatesBetween(startIso: string, endIso: string): string[] {
     const result: string[] = [];
     const start = new Date(startIso);
     const end = new Date(endIso);
-    let current = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 0, 0));
+
+    let current = DateTimeStandardizer.getUTCMonthEndNoShift(start.getUTCFullYear(), start.getUTCMonth());
 
     while (current.getTime() < end.getTime()) {
       if (current.getTime() > start.getTime()) {
         result.push(current.toISOString());
       }
-      current = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 2, 0, 23, 0, 0));
+      current = DateTimeStandardizer.getUTCMonthEndNoShift(current.getUTCFullYear(), current.getUTCMonth() + 1);
     }
     return result;
+  }
+
+  /**
+   * ЯДРО: Изолированный расчёт одного суб-интервала с ПАРАЛЛЕЛЬНОЙ загрузкой данных
+   */
+  private static async _calculateSubPeriodReturns(
+    assets: IAssetAllocation[],
+    startIso: string,
+    finishIso: string,
+    settings: IGlobalSettings
+  ): Promise<ISubPeriodResult> {
+    const taxRate = settings.dividendTaxRate ?? 15;
+    const customRenames = settings.tickerRenames || [];
+    const customSplits = settings.stockSplits || [];
+
+    const calculatedAssets: ICalculatedAsset[] = [];
+    let totalAllocatedWeight = 0;
+    let portfolioProfitPercent = 0;
+
+    // ПАРАЛЛЕЛЬНАЯ ОБРАБОТКА ВСЕХ АКТИВОВ ТОЧКИ
+    const assetPromises = assets.map(async (asset) => {
+      const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
+      const startResolved = TickerResolver.resolveTicker(asset.ticker, startIso, customRenames);
+      const finishResolved = TickerResolver.resolveTicker(asset.ticker, finishIso, customRenames);
+      
+      const pStartRes = MarketDataSyncService.getOrFetchPrice(startResolved, startIso);
+      const pFinishRes = MarketDataSyncService.getOrFetchPrice(finishResolved, finishIso);
+      
+      // Запускаем запросы цен параллельно
+      const [pStart, pFinish] = await Promise.all([pStartRes, pFinishRes]);
+
+      const startPriceRaw = pStart?.price || 0;
+      const finishPriceRaw = pFinish?.price || 0;
+
+      const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, startIso, customRenames, customSplits);
+      const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, finishIso, customRenames, customSplits);
+
+      const startPrice = startPriceRaw > 0 ? startPriceRaw / p1Coef : 0;
+      const finishPrice = finishPriceRaw > 0 ? finishPriceRaw / p2Coef : 0;
+
+      let rawDividends = 0;
+      let netDividends = 0;
+
+      if (asset.type === 'STOCK' && startPrice > 0) {
+        const divsStartRes = MarketDataSyncService.getOrFetchDividends(startResolved);
+        const divsFinishRes = startResolved !== finishResolved 
+          ? MarketDataSyncService.getOrFetchDividends(finishResolved) 
+          : Promise.resolve([]);
+        
+        const [divsStart, divsFinish] = await Promise.all([divsStartRes, divsFinishRes]);
+        const allD = [...divsStart, ...divsFinish];
+        const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
+
+        const d1 = DateTimeStandardizer.toMSKDateString(startIso);
+        const d2 = DateTimeStandardizer.toMSKDateString(finishIso);
+        const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
+        
+        for (const d of periodDivs) {
+          const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
+          rawDividends += (Number(d.value) / divCoef);
+        }
+        netDividends = rawDividends * (1 - taxRate / 100);
+      }
+
+      const profitPercent = startPrice > 0 
+        ? FinancialMath.calculateStockProfit(startPrice, finishPrice, rawDividends, taxRate)
+        : 0;
+
+      return {
+        ticker: asset.ticker,
+        resolvedTicker: startResolved === finishResolved ? startResolved : `${startResolved} → ${finishResolved}`,
+        weight: asset.weight,
+        type: asset.type,
+        startPrice: Number(startPrice.toFixed(2)),
+        finishPrice: Number(finishPrice.toFixed(2)),
+        rawDividends: Number(rawDividends.toFixed(2)),
+        netDividends: Number(netDividends.toFixed(2)),
+        profitPercent: Number(profitPercent.toFixed(2)),
+      };
+    });
+
+    const resolvedAssets = await Promise.all(assetPromises);
+
+    for (const ca of resolvedAssets) {
+      calculatedAssets.push(ca);
+      totalAllocatedWeight += Number(ca.weight) || 0;
+      portfolioProfitPercent += ca.profitPercent * (ca.weight / 100);
+    }
+
+    // РАСЧЕТ LQDT И MCFTR ПАРАЛЛЕЛЬНО
+    const freeCashWeight = Math.max(0, Math.round((100 - totalAllocatedWeight) * 100) / 100);
+    let lqdtStartPrice = 0;
+    let lqdtFinishPrice = 0;
+    let lqdtProfitPercent = 0;
+
+    let mcftrStartPrice = 0;
+    let mcftrFinishPrice = 0;
+    let mcftrProfitPercent = 0;
+
+    const basePromises = [];
+    basePromises.push(MarketDataSyncService.getOrFetchMCFTR(startIso));
+    basePromises.push(MarketDataSyncService.getOrFetchMCFTR(finishIso));
+
+    if (freeCashWeight > 0) {
+      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', startIso));
+      basePromises.push(MarketDataSyncService.getOrFetchPrice('LQDT', finishIso));
+    }
+
+    const baseResults = await Promise.all(basePromises);
+    
+    mcftrStartPrice = baseResults[0]?.price || 0;
+    mcftrFinishPrice = baseResults[1]?.price || 0;
+    if (mcftrStartPrice > 0) {
+      mcftrProfitPercent = ((mcftrFinishPrice - mcftrStartPrice) / mcftrStartPrice) * 100;
+    }
+
+    if (freeCashWeight > 0) {
+      lqdtStartPrice = baseResults[2]?.price || 0;
+      lqdtFinishPrice = baseResults[3]?.price || 0;
+      if (lqdtStartPrice > 0) {
+        lqdtProfitPercent = ((lqdtFinishPrice - lqdtStartPrice) / lqdtStartPrice) * 100;
+        portfolioProfitPercent += lqdtProfitPercent * (freeCashWeight / 100);
+      }
+    }
+
+    return {
+      assets: calculatedAssets,
+      freeCashWeight,
+      lqdtStartPrice,
+      lqdtFinishPrice,
+      lqdtProfitPercent,
+      mcftrStartPrice,
+      mcftrFinishPrice,
+      mcftrProfitPercent,
+      portfolioProfitPercent
+    };
   }
 
   static async calculateChartCurveForRange(
     portfolio: IPortfolio,
     rangeStartIso: string,
-    rangeFinishIso: string
+    rangeFinishIso: string,
+    settings: IGlobalSettings
   ): Promise<IEquityChartPoint[]> {
-    const savedTax = UserStorage.getSettings().dividendTaxRate;
-    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
-    const customRenames = UserStorage.getSettings().tickerRenames || [];
-    const customSplits = UserStorage.getSettings().stockSplits || [];
-
     if (!portfolio.milestones || portfolio.milestones.length === 0) return [];
 
     const milestonesAsc = [...portfolio.milestones].sort(
@@ -149,78 +297,18 @@ export class PortfolioCalculationService {
       const subStartIso = allTimelineDates[i];
       const subFinishIso = allTimelineDates[i + 1];
       const subStartTime = new Date(subStartIso).getTime();
+      
       let activeMs = milestonesAsc[0];
-
       for (const ms of milestonesAsc) {
-        if (new Date(ms.date).getTime() <= subStartTime) {
-          activeMs = ms;
-        } else {
-          break;
-        }
+        if (new Date(ms.date).getTime() <= subStartTime) activeMs = ms;
+        else break;
       }
 
-      let subWeightedProfit = 0;
-      let subTotalWeight = 0;
+      const res = await this._calculateSubPeriodReturns(activeMs.assets, subStartIso, subFinishIso, settings);
 
-      for (const asset of activeMs.assets) {
-        const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
-        const startResolved = TickerResolver.resolveTicker(asset.ticker, subStartIso, customRenames);
-        const finishResolved = TickerResolver.resolveTicker(asset.ticker, subFinishIso, customRenames);
-        
-        subTotalWeight += Number(asset.weight) || 0;
+      cumPortfolioMult *= (1 + res.portfolioProfitPercent / 100);
+      cumMcftrMult *= (1 + res.mcftrProfitPercent / 100);
 
-        const pStart = await MarketDataSyncService.getOrFetchPrice(startResolved, subStartIso);
-        const pFinish = await MarketDataSyncService.getOrFetchPrice(finishResolved, subFinishIso);
-
-        const p1Raw = pStart?.price || 0;
-        const p2Raw = pFinish?.price || 0;
-
-        const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, subStartIso, customRenames, customSplits);
-        const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, subFinishIso, customRenames, customSplits);
-
-        const p1 = p1Raw > 0 ? p1Raw / p1Coef : 0;
-        const p2 = p2Raw > 0 ? p2Raw / p2Coef : 0;
-
-        if (p1 > 0) {
-          let divs = 0;
-          if (asset.type === 'STOCK') {
-            const divsStart = await MarketDataSyncService.getOrFetchDividends(startResolved);
-            const divsFinish = startResolved !== finishResolved ? await MarketDataSyncService.getOrFetchDividends(finishResolved) : [];
-            const allD = [...divsStart, ...divsFinish];
-            const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
-
-            const d1 = DateTimeStandardizer.toMSKDateString(subStartIso);
-            const d2 = DateTimeStandardizer.toMSKDateString(subFinishIso);
-            const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
-            
-            for (const d of periodDivs) {
-              const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
-              divs += (Number(d.value) / divCoef);
-            }
-            divs = divs * (1 - taxRate / 100);
-          }
-          const pPct = ((p2 + divs - p1) / p1) * 100;
-          subWeightedProfit += pPct * (asset.weight / 100);
-        }
-      }
-
-      const freeCashW = Math.max(0, Math.round((100 - subTotalWeight) * 100) / 100);
-      if (freeCashW > 0) {
-        const l1 = await MarketDataSyncService.getOrFetchPrice('LQDT', subStartIso);
-        const l2 = await MarketDataSyncService.getOrFetchPrice('LQDT', subFinishIso);
-        if (l1?.price && l2?.price && l1.price > 0) {
-          subWeightedProfit += (((l2.price - l1.price) / l1.price) * 100) * (freeCashW / 100);
-        }
-      }
-
-      const m1 = await MarketDataSyncService.getOrFetchMCFTR(subStartIso);
-      const m2 = await MarketDataSyncService.getOrFetchMCFTR(subFinishIso);
-      if (m1?.price && m2?.price && m1.price > 0) {
-        const subMcftrPct = ((m2.price - m1.price) / m1.price) * 100;
-        cumMcftrMult *= (1 + subMcftrPct / 100);
-      }
-
-      cumPortfolioMult *= (1 + subWeightedProfit / 100);
       const cumP = (cumPortfolioMult - 1) * 100;
       const cumM = (cumMcftrMult - 1) * 100;
 
@@ -241,12 +329,7 @@ export class PortfolioCalculationService {
     return chartPoints;
   }
 
-  static async calculatePortfolio(portfolio: IPortfolio): Promise<ICalculatedPortfolio> {
-    const savedTax = UserStorage.getSettings().dividendTaxRate;
-    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
-    const customRenames = UserStorage.getSettings().tickerRenames || [];
-    const customSplits = UserStorage.getSettings().stockSplits || [];
-
+  static async calculatePortfolio(portfolio: IPortfolio, settings: IGlobalSettings): Promise<ICalculatedPortfolio> {
     if (!portfolio.milestones || portfolio.milestones.length === 0) {
       return this.getEmptyResult(portfolio.id);
     }
@@ -269,102 +352,12 @@ export class PortfolioCalculationService {
     for (let i = 0; i < milestonesAsc.length; i++) {
       const currentMs = milestonesAsc[i];
       const msStartIso = currentMs.date;
-      let msFinishIso = finishDateIso;
-      if (i + 1 < milestonesAsc.length) {
-        msFinishIso = milestonesAsc[i + 1].date;
-      }
+      const msFinishIso = (i + 1 < milestonesAsc.length) ? milestonesAsc[i + 1].date : finishDateIso;
 
-      const msStartDate = new Date(msStartIso);
-      const msFinishDate = new Date(msFinishIso);
-      const durationHours = Math.max(1, Math.round((msFinishDate.getTime() - msStartDate.getTime()) / (1000 * 60 * 60)));
+      const durationHours = Math.max(1, Math.round((new Date(msFinishIso).getTime() - new Date(msStartIso).getTime()) / (1000 * 60 * 60)));
       const durationDays = Math.round(durationHours / 24);
 
-      const calculatedAssets: ICalculatedAsset[] = [];
-      let totalAllocatedWeight = 0;
-      let msWeightedProfitSum = 0;
-
-      for (const asset of currentMs.assets) {
-        const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
-        const startResolved = TickerResolver.resolveTicker(asset.ticker, msStartIso, customRenames);
-        const finishResolved = TickerResolver.resolveTicker(asset.ticker, msFinishIso, customRenames);
-        
-        totalAllocatedWeight += Number(asset.weight) || 0;
-
-        const startRes = await MarketDataSyncService.getOrFetchPrice(startResolved, msStartIso);
-        const finishRes = await MarketDataSyncService.getOrFetchPrice(finishResolved, msFinishIso);
-
-        const startPriceRaw = startRes?.price || 0;
-        const finishPriceRaw = finishRes?.price || 0;
-
-        const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, msStartIso, customRenames, customSplits);
-        const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, msFinishIso, customRenames, customSplits);
-
-        const startPrice = startPriceRaw > 0 ? startPriceRaw / p1Coef : 0;
-        const finishPrice = finishPriceRaw > 0 ? finishPriceRaw / p2Coef : 0;
-
-        let rawDividends = 0;
-        let netDividends = 0;
-
-        if (asset.type === 'STOCK') {
-          const divsStart = await MarketDataSyncService.getOrFetchDividends(startResolved);
-          const divsFinish = startResolved !== finishResolved ? await MarketDataSyncService.getOrFetchDividends(finishResolved) : [];
-          const allD = [...divsStart, ...divsFinish];
-          const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
-
-          const d1 = DateTimeStandardizer.toMSKDateString(msStartIso);
-          const d2 = DateTimeStandardizer.toMSKDateString(msFinishIso);
-          const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
-          
-          for (const d of periodDivs) {
-            const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
-            rawDividends += (Number(d.value) / divCoef);
-          }
-          netDividends = rawDividends * (1 - taxRate / 100);
-        }
-
-        const profitPercent = startPrice > 0 
-          ? FinancialMath.calculateStockProfit(startPrice, finishPrice, rawDividends, taxRate)
-          : 0;
-
-        calculatedAssets.push({
-          ticker: asset.ticker,
-          resolvedTicker: startResolved === finishResolved ? startResolved : `${startResolved} → ${finishResolved}`,
-          weight: asset.weight,
-          type: asset.type,
-          startPrice: Number(startPrice.toFixed(2)),
-          finishPrice: Number(finishPrice.toFixed(2)),
-          rawDividends: Number(rawDividends.toFixed(2)),
-          netDividends: Number(netDividends.toFixed(2)),
-          profitPercent: Number(profitPercent.toFixed(2)),
-        });
-
-        msWeightedProfitSum += profitPercent * (asset.weight / 100);
-      }
-
-      const freeCashWeight = Math.max(0, Math.round((100 - totalAllocatedWeight) * 100) / 100);
-      let lqdtStartPrice = 0;
-      let lqdtFinishPrice = 0;
-      let lqdtProfitPercent = 0;
-
-      if (freeCashWeight > 0) {
-        const lqdtStart = await MarketDataSyncService.getOrFetchPrice('LQDT', msStartIso);
-        const lqdtFinish = await MarketDataSyncService.getOrFetchPrice('LQDT', msFinishIso);
-        lqdtStartPrice = lqdtStart?.price || 0;
-        lqdtFinishPrice = lqdtFinish?.price || 0;
-        if (lqdtStartPrice > 0) {
-          lqdtProfitPercent = ((lqdtFinishPrice - lqdtStartPrice) / lqdtStartPrice) * 100;
-          msWeightedProfitSum += lqdtProfitPercent * (freeCashWeight / 100);
-        }
-      }
-
-      const m1 = await MarketDataSyncService.getOrFetchMCFTR(msStartIso);
-      const m2 = await MarketDataSyncService.getOrFetchMCFTR(msFinishIso);
-      const mcftrStartPrice = m1?.price || 0;
-      const mcftrFinishPrice = m2?.price || 0;
-      let mcftrProfitPercent = 0;
-      if (mcftrStartPrice > 0) {
-        mcftrProfitPercent = ((mcftrFinishPrice - mcftrStartPrice) / mcftrStartPrice) * 100;
-      }
+      const res = await this._calculateSubPeriodReturns(currentMs.assets, msStartIso, msFinishIso, settings);
 
       calculatedMilestones.push({
         milestoneId: currentMs.id,
@@ -372,22 +365,22 @@ export class PortfolioCalculationService {
         finishDateIso: msFinishIso,
         durationHours,
         durationDays,
-        assets: calculatedAssets,
-        freeCashWeight,
-        lqdtStartPrice,
-        lqdtFinishPrice,
-        lqdtProfitPercent,
-        totalProfitPercent: msWeightedProfitSum,
-        mcftrStartPrice,
-        mcftrFinishPrice,
-        mcftrProfitPercent,
-        mcftrAlphaPercent: msWeightedProfitSum - mcftrProfitPercent,
+        assets: res.assets,
+        freeCashWeight: res.freeCashWeight,
+        lqdtStartPrice: res.lqdtStartPrice,
+        lqdtFinishPrice: res.lqdtFinishPrice,
+        lqdtProfitPercent: res.lqdtProfitPercent,
+        totalProfitPercent: res.portfolioProfitPercent,
+        mcftrStartPrice: res.mcftrStartPrice,
+        mcftrFinishPrice: res.mcftrFinishPrice,
+        mcftrProfitPercent: res.mcftrProfitPercent,
+        mcftrAlphaPercent: res.portfolioProfitPercent - res.mcftrProfitPercent,
       });
 
-      milestoneReturns.push(msWeightedProfitSum);
+      milestoneReturns.push(res.portfolioProfitPercent);
     }
 
-    const chartPoints = await this.calculateChartCurveForRange(portfolio, startDateIso, finishDateIso);
+    const chartPoints = await this.calculateChartCurveForRange(portfolio, startDateIso, finishDateIso, settings);
 
     const totalProfitPercent = FinancialMath.calculateCompoundReturn(milestoneReturns);
     const monthlyReturnPercent = FinancialMath.calculateMonthlyRate(totalProfitPercent, totalDays);
@@ -395,10 +388,13 @@ export class PortfolioCalculationService {
 
     const mcftrStart = await MarketDataSyncService.getOrFetchMCFTR(startDateIso);
     const mcftrFinish = await MarketDataSyncService.getOrFetchMCFTR(finishDateIso);
+    
     let mcftrMonthlyReturnPercent = 0;
+    let mcftrTotalProfitPercent = 0;
+    
     if (mcftrStart?.price && mcftrFinish?.price && mcftrStart.price > 0) {
-      const mcftrTotal = ((mcftrFinish.price - mcftrStart.price) / mcftrStart.price) * 100;
-      mcftrMonthlyReturnPercent = FinancialMath.calculateMonthlyRate(mcftrTotal, totalDays);
+      mcftrTotalProfitPercent = ((mcftrFinish.price - mcftrStart.price) / mcftrStart.price) * 100;
+      mcftrMonthlyReturnPercent = FinancialMath.calculateMonthlyRate(mcftrTotalProfitPercent, totalDays);
     }
 
     const alphaMonthlyPercent = FinancialMath.calculateAlpha(monthlyReturnPercent, mcftrMonthlyReturnPercent);
@@ -419,7 +415,7 @@ export class PortfolioCalculationService {
       annualizedReturnPercent,
       mcftrStartPrice: mcftrStart?.price || 0,
       mcftrFinishPrice: mcftrFinish?.price || 0,
-      mcftrTotalProfitPercent: 0,
+      mcftrTotalProfitPercent,
       mcftrMonthlyReturnPercent,
       alphaMonthlyPercent,
       performanceColor,
@@ -428,12 +424,7 @@ export class PortfolioCalculationService {
     };
   }
 
-  static async calculateMonthlyReturnsMatrix(portfolio: IPortfolio): Promise<IMonthlyMatrixRow[]> {
-    const savedTax = UserStorage.getSettings().dividendTaxRate;
-    const taxRate = savedTax !== undefined && savedTax !== null ? savedTax : 15;
-    const customRenames = UserStorage.getSettings().tickerRenames || [];
-    const customSplits = UserStorage.getSettings().stockSplits || [];
-
+  static async calculateMonthlyReturnsMatrix(portfolio: IPortfolio, settings: IGlobalSettings): Promise<IMonthlyMatrixRow[]> {
     if (!portfolio.milestones || portfolio.milestones.length === 0) return [];
 
     const milestonesAsc = [...portfolio.milestones].sort(
@@ -457,8 +448,9 @@ export class PortfolioCalculationService {
       const yearMcftrReturns: number[] = [];
 
       for (let m = 0; m < 12; m++) {
-        const firstDayOfMonth = new Date(Date.UTC(yr, m, 1, 0, 0, 0));
-        const lastDayOfMonth = new Date(Date.UTC(yr, m + 1, 0, 23, 0, 0));
+        // Концы месяцев строим через полдень UTC
+        const firstDayOfMonth = DateTimeStandardizer.getUTCMonthEndNoShift(yr, m - 1);
+        const lastDayOfMonth = DateTimeStandardizer.getUTCMonthEndNoShift(yr, m);
 
         if (lastDayOfMonth.getTime() < startDate.getTime() || firstDayOfMonth.getTime() > finishDate.getTime()) {
           cells.push({
@@ -474,72 +466,17 @@ export class PortfolioCalculationService {
         const calcStartIso = DateTimeStandardizer.toUTCISOString(calcStart);
         const calcFinishIso = DateTimeStandardizer.toUTCISOString(calcFinish);
 
+        const calcStartTime = calcStart.getTime();
         let activeMs = milestonesAsc[0];
         for (const ms of milestonesAsc) {
-          if (new Date(ms.date).getTime() <= calcStart.getTime()) activeMs = ms;
+          if (new Date(ms.date).getTime() <= calcStartTime) activeMs = ms;
           else break;
         }
 
-        let subWeightedProfit = 0;
-        let subTotalWeight = 0;
+        const res = await this._calculateSubPeriodReturns(activeMs.assets, calcStartIso, calcFinishIso, settings);
 
-        for (const asset of activeMs.assets) {
-          const currentTicker = TickerResolver.resolveTickerToCurrent(asset.ticker, customRenames);
-          const startResolved = TickerResolver.resolveTicker(asset.ticker, calcStartIso, customRenames);
-          const finishResolved = TickerResolver.resolveTicker(asset.ticker, calcFinishIso, customRenames);
-          
-          subTotalWeight += Number(asset.weight) || 0;
-
-          const pStart = await MarketDataSyncService.getOrFetchPrice(startResolved, calcStartIso);
-          const pFinish = await MarketDataSyncService.getOrFetchPrice(finishResolved, calcFinishIso);
-
-          const p1Coef = TickerResolver.getPriceAdjustmentToToday(startResolved, calcStartIso, customRenames, customSplits);
-          const p2Coef = TickerResolver.getPriceAdjustmentToToday(finishResolved, calcFinishIso, customRenames, customSplits);
-
-          const p1 = pStart?.price ? pStart.price / p1Coef : 0;
-          const p2 = pFinish?.price ? pFinish.price / p2Coef : 0;
-
-          if (p1 > 0) {
-            let divs = 0;
-            if (asset.type === 'STOCK') {
-              const divsStart = await MarketDataSyncService.getOrFetchDividends(startResolved);
-              const divsFinish = startResolved !== finishResolved ? await MarketDataSyncService.getOrFetchDividends(finishResolved) : [];
-              const allD = [...divsStart, ...divsFinish];
-              const uniqueD = Array.from(new Map(allD.map(d => [d.date, d])).values());
-
-              const d1 = DateTimeStandardizer.toMSKDateString(calcStartIso);
-              const d2 = DateTimeStandardizer.toMSKDateString(calcFinishIso);
-              const periodDivs = uniqueD.filter(d => d.date > d1 && d.date <= d2);
-              
-              for (const d of periodDivs) {
-                const divCoef = TickerResolver.getDividendAdjustmentToToday(currentTicker, new Date(d.date).toISOString(), customSplits);
-                divs += (Number(d.value) / divCoef);
-              }
-              divs = divs * (1 - taxRate / 100);
-            }
-            const pPct = ((p2 + divs - p1) / p1) * 100;
-            subWeightedProfit += pPct * (asset.weight / 100);
-          }
-        }
-
-        const freeCashW = Math.max(0, Math.round((100 - subTotalWeight) * 100) / 100);
-        if (freeCashW > 0) {
-          const l1 = await MarketDataSyncService.getOrFetchPrice('LQDT', calcStartIso);
-          const l2 = await MarketDataSyncService.getOrFetchPrice('LQDT', calcFinishIso);
-          if (l1?.price && l2?.price && l1.price > 0) {
-            subWeightedProfit += (((l2.price - l1.price) / l1.price) * 100) * (freeCashW / 100);
-          }
-        }
-
-        const m1 = await MarketDataSyncService.getOrFetchMCFTR(calcStartIso);
-        const m2 = await MarketDataSyncService.getOrFetchMCFTR(calcFinishIso);
-        let subMcftrPct = 0;
-        if (m1?.price && m2?.price && m1.price > 0) {
-          subMcftrPct = ((m2.price - m1.price) / m1.price) * 100;
-        }
-
-        const mPortfolioRet = Number(subWeightedProfit.toFixed(2));
-        const mMcftrRet = Number(subMcftrPct.toFixed(2));
+        const mPortfolioRet = Number(res.portfolioProfitPercent.toFixed(2));
+        const mMcftrRet = Number(res.mcftrProfitPercent.toFixed(2));
         const mAlpha = Number((mPortfolioRet - mMcftrRet).toFixed(2));
 
         cells.push({

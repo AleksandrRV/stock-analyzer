@@ -1,9 +1,19 @@
 import { create } from 'zustand';
 import { IPortfolio, IPortfolioGroup, IMilestone, IGlobalSettings, IExportData, ITickerRename, IStockSplit } from '../types/domain';
 import { UserStorage, DEFAULT_SETTINGS } from '../services/storage/userStorage';
-import { ICalculatedPortfolio } from '../services/engine/PortfolioCalculationService';
+import { ICalculatedPortfolio, IMonthlyMatrixRow } from '../services/engine/PortfolioCalculationService';
 
 const GROUPS_STORAGE_KEY = 'app_user_groups';
+
+export interface ICachedCalculation {
+  calculatedAtHour: number;
+  result: ICalculatedPortfolio;
+}
+
+export interface ICachedMatrix {
+  calculatedAtHour: number;
+  result: IMonthlyMatrixRow[];
+}
 
 interface PortfolioState {
   portfolios: IPortfolio[];
@@ -12,8 +22,11 @@ interface PortfolioState {
   activeGroupId: string | null;
   selectedPortfolioId: string | null;
   
-  calculationsCache: Record<string, ICalculatedPortfolio>;
-  setCalculationCache: (portfolioId: string, calcResult: ICalculatedPortfolio) => void;
+  calculationsCache: Record<string, ICachedCalculation>;
+  matrixCache: Record<string, ICachedMatrix>;
+  
+  setCalculationCache: (portfolioId: string, calcResult: ICalculatedPortfolio, currentHour: number) => void;
+  setMatrixCache: (portfolioId: string, matrixResult: IMonthlyMatrixRow[], currentHour: number) => void;
   clearCalculationCache: (portfolioId?: string) => void;
 
   loadFromStorage: () => void;
@@ -51,23 +64,33 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   activeGroupId: null,
   selectedPortfolioId: null,
+  
   calculationsCache: {},
+  matrixCache: {},
 
-  setCalculationCache: (portfolioId, calcResult) => {
+  setCalculationCache: (portfolioId, calcResult, currentHour) => {
     set(state => ({
-      calculationsCache: { ...state.calculationsCache, [portfolioId]: calcResult }
+      calculationsCache: { ...state.calculationsCache, [portfolioId]: { calculatedAtHour: currentHour, result: calcResult } }
+    }));
+  },
+
+  setMatrixCache: (portfolioId, matrixResult, currentHour) => {
+    set(state => ({
+      matrixCache: { ...state.matrixCache, [portfolioId]: { calculatedAtHour: currentHour, result: matrixResult } }
     }));
   },
 
   clearCalculationCache: (portfolioId) => {
     if (portfolioId) {
       set(state => {
-        const newCache = { ...state.calculationsCache };
-        delete newCache[portfolioId];
-        return { calculationsCache: newCache };
+        const newCalc = { ...state.calculationsCache };
+        const newMatrix = { ...state.matrixCache };
+        delete newCalc[portfolioId];
+        delete newMatrix[portfolioId];
+        return { calculationsCache: newCalc, matrixCache: newMatrix };
       });
     } else {
-      set({ calculationsCache: {} });
+      set({ calculationsCache: {}, matrixCache: {} });
     }
   },
 
@@ -117,17 +140,29 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     get().updateSettings({ stockSplits: updatedSplits });
   },
 
+  // БЕЗОПАСНОЕ ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ИМПОРТЕ
   restoreFullData: (data) => {
+    // Безопасное слияние настроек: если в файле нет каких-то полей, берем дефолтные
+    const safeSettings: IGlobalSettings = {
+      ...DEFAULT_SETTINGS,
+      ...data.settings,
+      tickerRenames: data.settings?.tickerRenames || [],
+      stockSplits: data.settings?.stockSplits || [],
+    };
+
     set({
-      settings: data.settings || DEFAULT_SETTINGS,
+      settings: safeSettings,
       groups: data.groups || [],
       portfolios: data.portfolios || [],
       selectedPortfolioId: null,
       activeGroupId: null,
     });
-    UserStorage.saveSettings(data.settings || DEFAULT_SETTINGS);
+
+    UserStorage.saveSettings(safeSettings);
     UserStorage.savePortfolios(data.portfolios || []);
     localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(data.groups || []));
+    
+    // Обязательный сброс кэшей расчетов, чтобы новые портфели пересчитались "с чистого листа"
     get().clearCalculationCache();
   },
 

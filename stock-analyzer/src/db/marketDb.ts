@@ -2,19 +2,21 @@ import Dexie, { Table } from 'dexie';
 import { IPriceHistory, IDividendHistory } from '../types/domain';
 
 interface ICacheMeta {
-  key: string; // Например "DIV_SBER" или "PRICE_SBER_2024-01-01"
+  key: string;
   lastUpdatedMs: number;
 }
 
+// Список известных фондов ликвидности для безопасной очистки
+const KNOWN_FUNDS = ['LQDT', 'SBMM', 'AKMM', 'TRUR'];
+
 export class MarketDatabase extends Dexie {
-  prices!: Table<IPriceHistory, [string, string]>; // PK = [ticker, date]
-  dividends!: Table<IDividendHistory, [string, string]>; // PK = [ticker, date]
+  prices!: Table<IPriceHistory, [string, string]>;
+  dividends!: Table<IDividendHistory, [string, string]>;
   meta!: Table<ICacheMeta, string>;
 
   constructor() {
     super('MarketCacheDB');
 
-    // Версия 2: Переход на составные первичные ключи для абсолютной дедупликации!
     this.version(2).stores({
       prices: '[ticker+date], ticker, date',
       dividends: '[ticker+date], ticker, date, isManual',
@@ -22,7 +24,6 @@ export class MarketDatabase extends Dexie {
     });
   }
 
-  // Проверка актуальности кэша (TTL)
   async isCacheValid(key: string, ttlMs: number): Promise<boolean> {
     const record = await this.meta.get(key);
     if (!record) return false;
@@ -33,7 +34,6 @@ export class MarketDatabase extends Dexie {
     await this.meta.put({ key, lastUpdatedMs: Date.now() });
   }
 
-  // Дивиденды +- 30 дней
   async hasDividendInWindow(ticker: string, dateStr: string, windowDays = 30): Promise<boolean> {
     const cleanTicker = ticker.trim().toUpperCase();
     const targetTime = new Date(dateStr).getTime();
@@ -43,7 +43,6 @@ export class MarketDatabase extends Dexie {
     return existing.some(div => Math.abs(new Date(div.date).getTime() - targetTime) <= windowMs);
   }
 
-  // Сверка и автоматическая очистка ручных дивидендов
   async reconcileAndSaveMoexDividends(ticker: string, moexDividends: IDividendHistory[]) {
     const cleanTicker = ticker.trim().toUpperCase();
     const windowMs = 30 * 24 * 60 * 60 * 1000;
@@ -54,7 +53,6 @@ export class MarketDatabase extends Dexie {
       .filter(d => !!d.isManual)
       .toArray();
 
-    // Находим ключи ручных записей для удаления
     const manualKeysToDelete: [string, string][] = [];
 
     for (const manual of existingManuals) {
@@ -71,7 +69,6 @@ export class MarketDatabase extends Dexie {
     }
 
     if (moexDividends.length > 0) {
-      // Идеальное сохранение: bulkPut на составной ключ строго ПЕРЕЗАПИСЫВАЕТ данные
       await this.dividends.bulkPut(moexDividends);
     }
   }
@@ -80,25 +77,32 @@ export class MarketDatabase extends Dexie {
     return await this.dividends.filter(d => !!d.isManual).toArray();
   }
 
+  // Очистка ТОЛЬКО акций (Исключая MCFTR и фонды)
   async clearStockPricesOnly() {
-    await this.prices.filter(p => p.ticker !== 'MCFTR' && p.ticker !== 'LQDT').delete();
-    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !m.key.includes('LQDT')).delete();
+    await this.prices.filter(p => p.ticker !== 'MCFTR' && !KNOWN_FUNDS.includes(p.ticker)).delete();
+    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !KNOWN_FUNDS.some(f => m.key.includes(f))).delete();
   }
+  
+  // ИСПРАВЛЕНИЕ: Очистка ВСЕХ фондов ликвидности
   async clearFundPricesOnly() {
-    await this.prices.where('ticker').equals('LQDT').delete();
+    await this.prices.filter(p => KNOWN_FUNDS.includes(p.ticker)).delete();
   }
+  
   async clearIndicesOnly() {
     await this.prices.where('ticker').equals('MCFTR').delete();
   }
+  
   async clearDividendsOnly() {
     await this.dividends.clear();
     await this.meta.filter(m => m.key.startsWith('DIV_')).delete();
   }
+  
   async clearAllCache() {
     await this.prices.clear();
     await this.dividends.clear();
     await this.meta.clear();
   }
+  
   async getCacheStats() {
     return { pricesCount: await this.prices.count(), dividendsCount: await this.dividends.count() };
   }

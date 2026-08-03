@@ -1,14 +1,9 @@
 import { IExportData } from '../../types/domain';
 
 export class FilePortabilityService {
-  /**
-   * Экспортирует данные приложения в файл JSON.
-   * Использует File System Access API (на ПК) или Blob (на моб. устройствах).
-   */
   static async exportData(data: IExportData, defaultFilename = 'moex_strategies_backup.json'): Promise<boolean> {
     const jsonString = JSON.stringify(data, null, 2);
 
-    // 1. Прогрессивное улучшение: File System Access API (Chrome/Edge на ПК)
     if ('showSaveFilePicker' in window) {
       try {
         const handle = await (window as any).showSaveFilePicker({
@@ -25,12 +20,11 @@ export class FilePortabilityService {
         await writable.close();
         return true;
       } catch (err: any) {
-        if (err.name === 'AbortError') return false; // Пользователь отменил окно
+        if (err.name === 'AbortError') return false; 
         console.warn('File System Access API failed, falling back to Blob download:', err);
       }
     }
 
-    // 2. Кроссплатформенный фоллбэк: Blob + <a download> (Android / iOS / Firefox)
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -44,7 +38,7 @@ export class FilePortabilityService {
   }
 
   /**
-   * Проверяет и парсит структуру импортируемого JSON файла
+   * Проверяет и парсит структуру импортируемого JSON файла со строгой валидацией
    */
   static parseImportFile(jsonString: string): IExportData {
     let parsed: any;
@@ -64,6 +58,32 @@ export class FilePortabilityService {
 
     if (!Array.isArray(parsed.portfolios)) {
       throw new Error('Файл не содержит списка портфелей');
+    }
+
+    // Жесткая валидация структуры портфелей и весов активов
+    for (const port of parsed.portfolios) {
+      if (!port.id || !port.name) {
+        throw new Error('Один из портфелей не содержит ID или Имени');
+      }
+      if (Array.isArray(port.milestones)) {
+        for (const ms of port.milestones) {
+          if (!ms.id || !ms.date) throw new Error(`Контрольная точка портфеля ${port.name} повреждена`);
+          
+          if (Array.isArray(ms.assets)) {
+            let totalWeight = 0;
+            for (const asset of ms.assets) {
+              if (!asset.ticker || typeof asset.weight !== 'number') {
+                throw new Error(`Актив в портфеле ${port.name} поврежден`);
+              }
+              totalWeight += asset.weight;
+            }
+            // Защита от измененных вручную файлов с перевесом
+            if (totalWeight > 100.001) {
+              throw new Error(`Сумма долей активов в портфеле "${port.name}" превышает 100% (${totalWeight}%)`);
+            }
+          }
+        }
+      }
     }
 
     return parsed as IExportData;

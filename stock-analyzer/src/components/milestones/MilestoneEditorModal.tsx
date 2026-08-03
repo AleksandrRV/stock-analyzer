@@ -3,6 +3,7 @@ import { IMilestone, IAssetAllocation, AssetType } from '../../types/domain';
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { TickerResolver } from '../../engine/TickerResolver';
 import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
+import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { Calendar, Plus, Trash2, Scale, AlertCircle, X, HelpCircle } from 'lucide-react';
 
 interface Props {
@@ -18,39 +19,39 @@ export const MilestoneEditorModal: React.FC<Props> = ({
   onSave,
   onClose,
 }) => {
-  // Локальная дата и час (YYYY-MM-DDTHH:00)
-  const [localDateTime, setLocalDateTime] = useState(() => {
-    const now = new Date();
-    now.setMinutes(0, 0, 0);
-    return now.toISOString().slice(0, 13) + ':00';
-  });
+  const { settings } = usePortfolioStore();
+
+  const [localDateTime, setLocalDateTime] = useState(() => 
+    DateTimeStandardizer.getLocalDatetimeLocalString()
+  );
 
   const [assets, setAssets] = useState<IAssetAllocation[]>([]);
   const [newTickerInput, setNewTickerInput] = useState('');
   const [newAssetType, setNewAssetType] = useState<AssetType>('STOCK');
 
   useEffect(() => {
-    if (initialMilestone) {
+    if (initialMilestone && !initialMilestone.id.startsWith('new_')) {
+      // Истинная старая точка - переводим сохраненный UTC в локальный дисплей для инпута
       const localDisp = DateTimeStandardizer.formatToLocalDisplay(initialMilestone.date);
       setLocalDateTime(localDisp.replace(' ', 'T'));
       setAssets(initialMilestone.assets || []);
+    } else if (initialMilestone && initialMilestone.id.startsWith('new_')) {
+      // Скопированная точка или новая - используем текущее локальное время
+      setLocalDateTime(DateTimeStandardizer.getLocalDatetimeLocalString(initialMilestone.date));
+      setAssets(initialMilestone.assets || []);
     } else {
-      const now = new Date();
-      now.setMinutes(0, 0, 0);
-      setLocalDateTime(now.toISOString().slice(0, 13) + ':00');
+      setLocalDateTime(DateTimeStandardizer.getLocalDatetimeLocalString());
       setAssets([]);
     }
   }, [initialMilestone, isOpen]);
 
   if (!isOpen) return null;
 
-  // Рассчитываем суммарный процент активов
   const totalWeightRaw = assets.reduce((sum, a) => sum + (Number(a.weight) || 0), 0);
-  const totalWeight = Math.round(totalWeightRaw * 100) / 100; // Округление для погрешностей float
+  const totalWeight = Math.round(totalWeightRaw * 100) / 100; 
   const freeCashWeight = Math.max(0, Math.round((100 - totalWeight) * 100) / 100);
   const isOverallocated = totalWeight > 100.001;
 
-  // Добавление актива
   const handleAddAsset = (tickerToAdd: string, typeToAdd: AssetType = 'STOCK') => {
     const cleanTicker = tickerToAdd.trim().toUpperCase();
     if (!cleanTicker) return;
@@ -64,40 +65,32 @@ export const MilestoneEditorModal: React.FC<Props> = ({
     setNewTickerInput('');
   };
 
-  // Удаление актива
   const handleRemoveAsset = (index: number) => {
     setAssets(assets.filter((_, i) => i !== index));
   };
 
-  // Изменение веса актива с точностью ДО СОТЫХ
   const handleWeightChange = (index: number, newWeight: number) => {
     const updated = [...assets];
-    // Округляем до сотых
     const rounded = Math.floor(newWeight * 100) / 100;
     updated[index].weight = Math.max(0, Math.min(100, rounded));
     setAssets(updated);
   };
 
-  // КНОПКА: Автоматическая ребалансировка с округлением В МЕНЬШУЮ СТОРУНУ
   const handleAutoRebalance = () => {
     if (assets.length === 0) return;
-    // Строгое округление в меньшую сторону до сотых
     const equalWeight = Math.floor((100 / assets.length) * 100) / 100;
     setAssets(assets.map(a => ({ ...a, weight: equalWeight })));
   };
 
-  // Сохранение точки
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (isOverallocated) return;
 
     const utcIso = DateTimeStandardizer.toUTCISOString(new Date(localDateTime));
-
-    // Если это новая точка (нет id) или скопированная точка — создаем новый ID
     const isNewPoint = !initialMilestone?.id || initialMilestone.id.startsWith('new_');
 
     const milestoneToSave: IMilestone = {
-      id: isNewPoint ? `mst_${Date.now()}_${Math.random().toString(36).substring(2, 5)}` : initialMilestone.id,
+      id: isNewPoint ? `mst_${Date.now()}_${Math.random().toString(36).substring(2, 5)}` : initialMilestone!.id,
       date: utcIso,
       assets: assets.map(a => ({ 
         ...a, 
@@ -116,7 +109,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-xl max-h-[90vh] flex flex-col">
         
-        {/* Заголовок */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
@@ -138,7 +130,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
 
         <form onSubmit={handleSave} className="space-y-5 overflow-y-auto pr-1 flex-1">
           
-          {/* ПОЛЕ: Дата и Час в локальном времени */}
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between">
               <span>Дата и час среза (Локальное время):</span>
@@ -154,7 +145,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             />
           </div>
 
-          {/* ИНДИКАТОР ВЕСОВ И СВОБОДНОГО КЭША (LQDT) */}
           <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 rounded-xl space-y-2">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span>Распределение портфеля:</span>
@@ -163,7 +153,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
               </span>
             </div>
 
-            {/* Прогресс-бар */}
             <div className="w-full h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden flex">
               <div
                 className={`h-full transition-all ${isOverallocated ? 'bg-rose-500' : 'bg-sky-500'}`}
@@ -181,13 +170,8 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
               <span>Свободный кэш (Авто-LQDT): <strong className="text-emerald-500">{freeCashWeight.toFixed(2)}%</strong></span>
               {assets.length > 1 && (
-                <button
-                  type="button"
-                  onClick={handleAutoRebalance}
-                  className="flex items-center gap-1 text-sky-600 dark:text-sky-400 hover:underline font-medium"
-                >
-                  <Scale className="w-3.5 h-3.5" />
-                  <span>Поровну (Ребаланс)</span>
+                <button type="button" onClick={handleAutoRebalance} className="flex items-center gap-1 text-sky-600 dark:text-sky-400 hover:underline font-medium">
+                  <Scale className="w-3.5 h-3.5" /><span>Поровну (Ребаланс)</span>
                 </button>
               )}
             </div>
@@ -200,7 +184,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             )}
           </div>
 
-          {/* ДОБАВЛЕНИЕ НОВОГО АКТИВА */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Добавить бумагу:</label>
             <div className="flex gap-2">
@@ -228,7 +211,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
               </button>
             </div>
 
-            {/* Быстрый выбор */}
             <div className="flex items-center gap-1.5 flex-wrap pt-1">
               <span className="text-[11px] text-slate-400">Быстро:</span>
               {POPULAR_MOEX_ASSETS.slice(0, 8).map(pop => (
@@ -244,7 +226,6 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* СПИСОК ДОБАВЛЕННЫХ АКТИВОВ */}
           <div className="space-y-2">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
               Состав активов ({assets.length}):
@@ -257,14 +238,11 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             ) : (
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                 {assets.map((asset, index) => {
-                  const resolved = TickerResolver.resolveTicker(asset.ticker, targetUtcIso);
+                  const resolved = TickerResolver.resolveTicker(asset.ticker, targetUtcIso, settings.tickerRenames);
                   const isRenamed = resolved !== asset.ticker;
 
                   return (
-                    <div
-                      key={asset.ticker}
-                      className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm gap-3"
-                    >
+                    <div key={asset.ticker} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm gap-3">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-sky-500">{asset.ticker}</span>
                         <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-400">
@@ -291,12 +269,7 @@ export const MilestoneEditorModal: React.FC<Props> = ({
                           />
                           <span className="text-xs text-slate-400">%</span>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAsset(index)}
-                          className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
-                        >
+                        <button type="button" onClick={() => handleRemoveAsset(index)} className="p-1 text-slate-400 hover:text-rose-500 transition-colors">
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
@@ -307,24 +280,12 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             )}
           </div>
 
-          {/* КНОПКИ ДЕЙСТВИЯ */}
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors"
-            >
-              Отмена
-            </button>
-            <button
-              type="submit"
-              disabled={isOverallocated}
-              className="px-5 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors"
-            >
+            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors">Отмена</button>
+            <button type="submit" disabled={isOverallocated} className="px-5 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
               Сохранить точку
             </button>
           </div>
-
         </form>
       </div>
     </div>

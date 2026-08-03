@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { usePortfolioStore } from '../store/usePortfolioStore';
 import { IPortfolio, IPortfolioGroup } from '../types/domain';
 import { PortfolioCard } from './PortfolioCard';
@@ -23,7 +23,6 @@ export const DashboardView: React.FC = () => {
   const {
     groups,
     activeGroupId,
-    loadFromStorage,
     setActiveGroupId,
     setSelectedPortfolioId,
     createPortfolio,
@@ -43,10 +42,6 @@ export const DashboardView: React.FC = () => {
   const [movingPortfolio, setMovingPortfolio] = useState<IPortfolio | null>(null);
 
   const [showDebug, setShowDebug] = useState(false);
-
-  useEffect(() => {
-    loadFromStorage();
-  }, [loadFromStorage]);
 
   const visiblePortfolios = getVisiblePortfolios();
 

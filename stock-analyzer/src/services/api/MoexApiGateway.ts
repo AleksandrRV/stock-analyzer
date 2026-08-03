@@ -8,24 +8,17 @@ export interface IMoexPriceResult {
 }
 
 export class MoexApiGateway {
-  /**
-   * Получает динамический индекс колонки по её названию
-   */
   private static getColumnIndex(columns: string[], columnName: string): number {
     return columns.findIndex(col => col.toUpperCase() === columnName.toUpperCase());
   }
 
-  /**
-   * Загружает цену закрытия акции или фонда на заданную дату (или ближайшую прошлую торговую сессию)
-   */
   static async fetchClosePrice(
     ticker: string,
     mskDateString: string
   ): Promise<IMoexPriceResult | null> {
     try {
-      // Использование iss.reverse=true отдает свечи до указанной даты в обратном порядке.
-      // Первая свеча в массиве — это последняя доступная торговая сессия на/до указанной даты!
-      const url = `${BASE_URL}/engines/stock/markets/shares/securities/${ticker.toUpperCase()}/candles.json?iss.reverse=true&till=${mskDateString} 23:59:59&interval=24&marketprice_board=1`;
+      // ИСПРАВЛЕНИЕ: Экранируем пробел перед временем (%20)
+      const url = `${BASE_URL}/engines/stock/markets/shares/securities/${ticker.toUpperCase()}/candles.json?iss.reverse=true&till=${mskDateString}%2023:59:59&interval=24&marketprice_board=1`;
       
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
@@ -42,7 +35,7 @@ export class MoexApiGateway {
 
       const firstCandle = candles.data[0];
       const rawPrice = firstCandle[closeIdx];
-      const rawDateStr = firstCandle[endIdx]; // 'YYYY-MM-DD HH:mm:ss'
+      const rawDateStr = firstCandle[endIdx];
 
       const price = typeof rawPrice === 'string' ? parseFloat(rawPrice.replace(',', '.')) : Number(rawPrice);
       const tradeDate = rawDateStr.split(' ')[0];
@@ -54,9 +47,6 @@ export class MoexApiGateway {
     }
   }
 
-  /**
-   * Загружает исторические значения индекса MCFTR за выбранную дату
-   */
   static async fetchMCFTRIndex(
     fromMskDate: string,
     tillMskDate: string
@@ -77,7 +67,6 @@ export class MoexApiGateway {
       const closeIdx = this.getColumnIndex(history.columns, 'CLOSE');
       const dateIdx = this.getColumnIndex(history.columns, 'TRADEDATE');
 
-      // Берём последнюю доступную запись из массива за этот период
       const lastRow = history.data[history.data.length - 1];
       const rawPrice = lastRow[closeIdx];
       const tradeDate = String(lastRow[dateIdx]);
@@ -91,9 +80,6 @@ export class MoexApiGateway {
     }
   }
 
-  /**
-   * Загружает историю дивидендов по тикеру (Строго в валюте RUB, без валютных дубликатов ГДР)
-   */
   static async fetchDividends(ticker: string): Promise<IDividendHistory[]> {
     try {
       const url = `${BASE_URL}/securities/${ticker.toUpperCase()}/dividends.json`;
@@ -112,7 +98,6 @@ export class MoexApiGateway {
       const valueIdx = this.getColumnIndex(dividends.columns, 'value');
       const currencyIdx = this.getColumnIndex(dividends.columns, 'currencyid');
 
-      // Карта дедупликации по дате (сохраняет только рублевую выплату)
       const resultsMap = new Map<string, IDividendHistory>();
 
       for (const row of dividends.data) {
@@ -120,7 +105,6 @@ export class MoexApiGateway {
         const rawValue = row[valueIdx];
         const currency = currencyIdx !== -1 ? String(row[currencyIdx]).toUpperCase() : 'RUB';
 
-        // ИГНОРИРУЕМ USD/EUR ГДР-дубликаты! Берем только RUB / SUR / RUR
         if (currency === 'RUB' || currency === 'SUR' || currency === 'RUR' || currency === '') {
           const value = typeof rawValue === 'string' ? parseFloat(rawValue.replace(',', '.')) : Number(rawValue);
 

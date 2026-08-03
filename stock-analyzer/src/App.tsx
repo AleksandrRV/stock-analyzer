@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ThemeProvider } from './context/ThemeContext';
 import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
@@ -10,7 +10,12 @@ import { PwaInstallPrompt } from './components/common/PwaInstallPrompt';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
-  const selectedPortfolioId = usePortfolioStore(state => state.selectedPortfolioId);
+  const { selectedPortfolioId, loadFromStorage } = usePortfolioStore();
+
+  // Глобальная первичная загрузка данных
+  useEffect(() => {
+    loadFromStorage();
+  }, [loadFromStorage]);
 
   return (
     <ErrorBoundary>
@@ -19,7 +24,6 @@ export function App() {
           <Header activeTab={activeTab} setActiveTab={setActiveTab} />
           
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-            {/* Промо баннер установки PWA */}
             <PwaInstallPrompt />
 
             {activeTab === 'settings' ? (

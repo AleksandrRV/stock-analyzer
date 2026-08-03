@@ -3,6 +3,7 @@ import { ICalculatedPortfolio, IEquityChartPoint, PortfolioCalculationService } 
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
 import { IPortfolio } from '../../types/domain';
 import { APP_CONFIG } from '../../constants/config';
+import { usePortfolioStore } from '../../store/usePortfolioStore';
 
 import {
   ResponsiveContainer,
@@ -25,6 +26,8 @@ interface Props {
 }
 
 export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio }) => {
+  const { settings } = usePortfolioStore(); // ДОБАВЛЕНО: получаем настройки
+  
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('ALL');
   const [chartPoints, setChartPoints] = useState<IEquityChartPoint[]>(calculatedPortfolio.chartPoints || []);
   const [showSpinner, setShowSpinner] = useState(false);
@@ -44,9 +47,7 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
     return d;
   };
 
-  // Пересчет кривой с задержкой появления спиннера (от дерганий)
   const updateChartRange = useCallback(async (filter: TimeFilter, startOverride?: string, finishOverride?: string) => {
-    // Включаем таймер на появление спиннера
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       setShowSpinner(true);
@@ -97,19 +98,19 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
       }
     }
 
+    // ИСПРАВЛЕНО: передаем settings 4-м аргументом
     const points = await PortfolioCalculationService.calculateChartCurveForRange(
       portfolio,
       targetStartIso,
-      targetFinishIso
+      targetFinishIso,
+      settings 
     );
 
-    // Сбрасываем таймер и скрываем спиннер
     if (timerRef.current) clearTimeout(timerRef.current);
     setShowSpinner(false);
 
-    // Обновляем точки бесшовно
     setChartPoints(points);
-  }, [portfolio, calculatedPortfolio]);
+  }, [portfolio, calculatedPortfolio, settings]);
 
   const handleFilterChange = (filter: TimeFilter) => {
     setTimeFilter(filter);
@@ -171,7 +172,6 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl p-5 space-y-4 shadow-sm relative overflow-hidden">
       
-      {/* СПИННЕР ПОЯВЛЯЕТСЯ ТОЛЬКО ПРИ ДОЛГОЙ ЗАГРУЗКЕ (> 300мс) */}
       {showSpinner && (
         <div className="absolute inset-0 z-20 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xs rounded-2xl flex flex-col items-center justify-center gap-2 text-xs font-mono text-slate-500 animate-in fade-in">
           <Loader2 className="w-6 h-6 animate-spin text-sky-500" />
@@ -179,14 +179,12 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
         </div>
       )}
 
-      {/* ШАПКА ГРАФИКА */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
         <div className="flex items-center gap-2 font-bold text-sm">
           <ChartIcon className="w-4 h-4 text-sky-500" />
           <span>Кривая доходности (Базлайн: 0.00%)</span>
         </div>
 
-        {/* Таймфреймы */}
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl text-xs font-mono overflow-x-auto">
           {(['1M', '3M', '6M', '1Y', 'YTD', 'ALL', 'CUSTOM'] as TimeFilter[]).map(filter => (
             <button
@@ -204,7 +202,6 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
         </div>
       </div>
 
-      {/* ПОЛЕ ВЫБОРА СВОЕГО ПЕРИОДА */}
       {timeFilter === 'CUSTOM' && (
         <form onSubmit={handleApplyCustomRange} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 flex flex-wrap items-end gap-3 text-xs font-mono animate-in fade-in">
           <div className="space-y-1">
@@ -247,7 +244,6 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
             <LineChart data={chartPoints} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.2} />
               
-              {/* ПРОПОРЦИОНАЛЬНАЯ ОСЬ X ПО ВРЕМЕНИ (type="number" + scale="time") */}
               <XAxis
                 dataKey="timestamp"
                 type="number"

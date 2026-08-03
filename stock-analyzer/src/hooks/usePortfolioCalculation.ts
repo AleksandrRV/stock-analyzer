@@ -4,27 +4,30 @@ import { PortfolioCalculationService, ICalculatedPortfolio } from '../services/e
 import { usePortfolioStore } from '../store/usePortfolioStore';
 
 export function usePortfolioCalculation(portfolio: IPortfolio) {
-  const { calculationsCache, setCalculationCache } = usePortfolioStore();
+  const { settings, calculationsCache, setCalculationCache } = usePortfolioStore();
   
-  // Если портфель уже был рассчитан и лежит в глобальном кэше — сразу отдаем его
-  const cachedResult: ICalculatedPortfolio | null = calculationsCache[portfolio.id] || null;
+  const currentHour = new Date().getHours(); // Текущий локальный час
+  const cachedWrapper = calculationsCache[portfolio.id];
+
+  // Проверяем валидность кэша: есть ли он, и совпадает ли час расчета с текущим
+  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentHour;
   
-  // Если кэша нет — показываем загрузку
-  const [loading, setLoading] = useState<boolean>(!cachedResult);
+  const cachedResult: ICalculatedPortfolio | null = isCacheValid ? cachedWrapper.result : null;
+  const [loading, setLoading] = useState<boolean>(!isCacheValid);
 
   useEffect(() => {
-    // Если результат уже есть в кэше — не делаем ничего
-    if (calculationsCache[portfolio.id]) {
+    if (isCacheValid) {
+      setLoading(false);
       return;
     }
 
     let isMounted = true;
     setLoading(true);
 
-    PortfolioCalculationService.calculatePortfolio(portfolio)
+    PortfolioCalculationService.calculatePortfolio(portfolio, settings)
       .then(res => {
         if (isMounted) {
-          setCalculationCache(portfolio.id, res);
+          setCalculationCache(portfolio.id, res, currentHour);
           setLoading(false);
         }
       })
@@ -38,7 +41,7 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     return () => {
       isMounted = false;
     };
-  }, [portfolio, calculationsCache, setCalculationCache]);
+  }, [portfolio, settings, isCacheValid, currentHour, setCalculationCache]);
 
   return { 
     result: cachedResult, 
