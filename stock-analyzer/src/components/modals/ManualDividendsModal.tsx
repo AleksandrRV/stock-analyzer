@@ -3,7 +3,8 @@ import { IDividendHistory } from '../../types/domain';
 import { marketDb } from '../../db/marketDb';
 import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
-import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X } from 'lucide-react';
+import { SmartLabGateway } from '../../services/api/SmartLabGateway';
+import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X, Globe, Loader2 } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [editingKey, setEditingKey] = useState<[string, string] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isSmartLabLoading, setIsSmartLabLoading] = useState(false);
 
   const loadManualList = async () => {
     const list = await marketDb.getAllManualDividends();
@@ -81,6 +83,41 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     loadFromStorage();
   };
 
+  const handleFetchSmartLab = async () => {
+    setIsSmartLabLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const currentYear = new Date().getFullYear();
+    const prevYear = currentYear - 1;
+
+    try {
+      const [divsCurrent, divsPrev] = await Promise.all([
+        SmartLabGateway.fetchSmartLabDividends(currentYear),
+        SmartLabGateway.fetchSmartLabDividends(prevYear),
+      ]);
+
+      const allSmartLab = [...divsCurrent, ...divsPrev];
+
+      if (allSmartLab.length === 0) {
+        setErrorMessage('Не удалось загрузить данные со Smart-Lab');
+        setIsSmartLabLoading(false);
+        return;
+      }
+
+      const res = await marketDb.processSmartLabDividends(allSmartLab);
+
+      setSuccessMessage(`Smart-Lab (${prevYear}-${currentYear}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}`);
+      await loadManualList();
+      clearCalculationCache();
+      loadFromStorage();
+    } catch (err: any) {
+      setErrorMessage(`Ошибка загрузки со Smart-Lab: ${err.message}`);
+    } finally {
+      setIsSmartLabLoading(false);
+    }
+  };
+
   const handleEdit = (div: IDividendHistory) => {
     setEditingKey([div.ticker, div.date]);
     setTicker(div.ticker);
@@ -114,6 +151,32 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
             <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* КНОПКА ЗАГРУЗКИ СО SMART-LAB */}
+        <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <Globe className="w-4 h-4 text-sky-500" />
+            <span>Импорт дивидендов со Smart-Lab</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleFetchSmartLab}
+            disabled={isSmartLabLoading}
+            className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+          >
+            {isSmartLabLoading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Загрузка...</span>
+              </>
+            ) : (
+              <>
+                <Globe className="w-3.5 h-3.5" />
+                <span>Загрузить данные со Smart-Lab</span>
+              </>
+            )}
           </button>
         </div>
 
@@ -216,7 +279,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
           {manualList.length === 0 ? (
             <div className="text-center py-8 text-xs text-slate-400 border border-dashed rounded-xl">
-              Ручных записей пока нет. При обновлении данных Мосбиржи они добавятся автоматически.
+              Ручных записей пока нет. Воспользуйтесь кнопкой загрузки со Smart-Lab выше.
             </div>
           ) : (
             <div className="space-y-1.5 font-mono text-xs">

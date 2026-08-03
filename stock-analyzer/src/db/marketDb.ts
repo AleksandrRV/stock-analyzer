@@ -1,10 +1,12 @@
 import Dexie, { Table } from 'dexie';
-import { IPriceHistory, IDividendHistory } from '../types/domain';
+import { IPriceHistory, IDividendHistory, AssetType } from '../types/domain';
 
 interface ICacheMeta {
   key: string;
   lastUpdatedMs: number;
 }
+
+const KNOWN_FUNDS = ['LQDT', 'SBMM', 'AKMM', 'TRUR'];
 
 export class MarketDatabase extends Dexie {
   prices!: Table<IPriceHistory, [string, string]>;
@@ -14,7 +16,6 @@ export class MarketDatabase extends Dexie {
   constructor() {
     super('MarketCacheDB');
 
-    // Версия 3: добавляем индекс по полю type для быстрой очистки
     this.version(3).stores({
       prices: '[ticker+date], ticker, date, type',
       dividends: '[ticker+date], ticker, date, isManual',
@@ -39,6 +40,54 @@ export class MarketDatabase extends Dexie {
 
     const existing = await this.dividends.where('ticker').equals(cleanTicker).toArray();
     return existing.some(div => Math.abs(new Date(div.date).getTime() - targetTime) <= windowMs);
+  }
+
+  async processSmartLabDividends(smartLabDividends: IDividendHistory[]): Promise<{ added: number; updated: number; skipped: number }> {
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    const windowMs = 30 * 24 * 60 * 60 * 1000;
+
+    for (const item of smartLabDividends) {
+      const cleanTicker = item.ticker.trim().toUpperCase();
+      const targetTime = new Date(item.date).getTime();
+
+      const existing = await this.dividends.where('ticker').equals(cleanTicker).toArray();
+
+      const hasOfficial = existing.some(d => !d.isManual && Math.abs(new Date(d.date).getTime() - targetTime) <= windowMs);
+      if (hasOfficial) {
+        skipped++;
+        continue;
+      }
+
+      const existingManual = existing.find(d => d.isManual && Math.abs(new Date(d.date).getTime() - targetTime) <= windowMs);
+
+      if (existingManual) {
+        if (existingManual.date === item.date && existingManual.value === item.value) {
+          skipped++;
+          continue;
+        }
+
+        await this.dividends.delete([existingManual.ticker, existingManual.date]);
+        await this.dividends.put({
+          ticker: cleanTicker,
+          date: item.date,
+          value: item.value,
+          isManual: true,
+        });
+        updated++;
+      } else {
+        await this.dividends.put({
+          ticker: cleanTicker,
+          date: item.date,
+          value: item.value,
+          isManual: true,
+        });
+        added++;
+      }
+    }
+
+    return { added, updated, skipped };
   }
 
   async reconcileAndSaveMoexDividends(ticker: string, moexDividends: IDividendHistory[]) {
@@ -75,21 +124,17 @@ export class MarketDatabase extends Dexie {
     return await this.dividends.filter(d => !!d.isManual).toArray();
   }
 
-  // Очистка ТОЛЬКО акций (Строго по полю type)
   async clearStockPricesOnly() {
     await this.prices.filter(p => p.type === 'STOCK').delete();
-    // Очищаем метаданные тех ключей, которые не фонды и не индексы
     const fundsAndIndexMetas = await this.prices.filter(p => p.type === 'FUND' || p.type === 'INDEX').toArray();
     const keepKeys = fundsAndIndexMetas.map(p => `PRICE_${p.ticker}_${p.date}`);
     await this.meta.filter(m => m.key.startsWith('PRICE_') && !keepKeys.includes(m.key)).delete();
   }
   
-  // Очистка ТОЛЬКО фондов (Любых тикеров, сохраненных как фонд)
   async clearFundPricesOnly() {
     await this.prices.filter(p => p.type === 'FUND').delete();
   }
   
-  // Очистка ТОЛЬКО индексов
   async clearIndicesOnly() {
     await this.prices.filter(p => p.type === 'INDEX').delete();
   }
