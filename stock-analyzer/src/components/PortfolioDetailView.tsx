@@ -7,7 +7,7 @@ import { MilestoneEditorModal } from './milestones/MilestoneEditorModal';
 import { ClosePortfolioModal } from './modals/ClosePortfolioModal';
 import { usePortfolioCalculation } from '../hooks/usePortfolioCalculation';
 import { PortfolioChart } from './analytics/PortfolioChart';
-import { MonthlyReturnsMatrix } from './analytics/MonthlyReturnsMatrix'; // Импорт Матрицы
+import { MonthlyReturnsMatrix } from './analytics/MonthlyReturnsMatrix';
 
 import { 
   ArrowLeft, 
@@ -28,6 +28,7 @@ import {
 
 export const PortfolioDetailView: React.FC = () => {
   const { 
+    settings,
     getSelectedPortfolio, 
     setSelectedPortfolioId, 
     addMilestone, 
@@ -43,7 +44,6 @@ export const PortfolioDetailView: React.FC = () => {
   const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
   const [editingMilestone, setEditingMilestone] = useState<IMilestone | null>(null);
 
-  // Таб переключения аналитики: 'CHART' (График) или 'MATRIX' (Таблица)
   const [analyticsTab, setAnalyticsTab] = useState<'CHART' | 'MATRIX'>('CHART');
 
   if (!portfolio) {
@@ -371,10 +371,11 @@ export const PortfolioDetailView: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* СОСТАВ БУМАГ */}
+                  {/* СОСТАВ БУМАГ С УЧЕТОМ ПОЛЬЗОВАТЕЛЬСКИХ РЕНЕЙМОВ */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
                     {milestone.assets.map(asset => {
-                      const resolved = TickerResolver.resolveTicker(asset.ticker, milestone.date);
+                      // Пробрасываем settings.tickerRenames для корректных подсказок!
+                      const resolved = TickerResolver.resolveTicker(asset.ticker, milestone.date, settings.tickerRenames);
                       const calcAsset = calcMs?.assets.find(a => a.ticker === asset.ticker);
 
                       return (

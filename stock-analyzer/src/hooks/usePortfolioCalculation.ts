@@ -6,11 +6,11 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 export function usePortfolioCalculation(portfolio: IPortfolio) {
   const { settings, calculationsCache, setCalculationCache } = usePortfolioStore();
   
-  const currentHour = new Date().getHours(); // Текущий локальный час
+  // Абсолютный час в истории (миллисекунды / 3,600,000) - гарантирует сброс на следующий день!
+  const currentAbsoluteHour = Math.floor(Date.now() / 3600000);
+  
   const cachedWrapper = calculationsCache[portfolio.id];
-
-  // Проверяем валидность кэша: есть ли он, и совпадает ли час расчета с текущим
-  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentHour;
+  const isCacheValid = cachedWrapper && cachedWrapper.calculatedAtHour === currentAbsoluteHour;
   
   const cachedResult: ICalculatedPortfolio | null = isCacheValid ? cachedWrapper.result : null;
   const [loading, setLoading] = useState<boolean>(!isCacheValid);
@@ -27,7 +27,7 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     PortfolioCalculationService.calculatePortfolio(portfolio, settings)
       .then(res => {
         if (isMounted) {
-          setCalculationCache(portfolio.id, res, currentHour);
+          setCalculationCache(portfolio.id, res, currentAbsoluteHour);
           setLoading(false);
         }
       })
@@ -41,10 +41,7 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
     return () => {
       isMounted = false;
     };
-  }, [portfolio, settings, isCacheValid, currentHour, setCalculationCache]);
+  }, [portfolio, settings, isCacheValid, currentAbsoluteHour, setCalculationCache]);
 
-  return { 
-    result: cachedResult, 
-    loading 
-  };
+  return { result: cachedResult, loading };
 }

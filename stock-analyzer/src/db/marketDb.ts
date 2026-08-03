@@ -6,9 +6,6 @@ interface ICacheMeta {
   lastUpdatedMs: number;
 }
 
-// Список известных фондов ликвидности для безопасной очистки
-const KNOWN_FUNDS = ['LQDT', 'SBMM', 'AKMM', 'TRUR'];
-
 export class MarketDatabase extends Dexie {
   prices!: Table<IPriceHistory, [string, string]>;
   dividends!: Table<IDividendHistory, [string, string]>;
@@ -17,8 +14,9 @@ export class MarketDatabase extends Dexie {
   constructor() {
     super('MarketCacheDB');
 
-    this.version(2).stores({
-      prices: '[ticker+date], ticker, date',
+    // Версия 3: добавляем индекс по полю type для быстрой очистки
+    this.version(3).stores({
+      prices: '[ticker+date], ticker, date, type',
       dividends: '[ticker+date], ticker, date, isManual',
       meta: 'key',
     });
@@ -77,19 +75,23 @@ export class MarketDatabase extends Dexie {
     return await this.dividends.filter(d => !!d.isManual).toArray();
   }
 
-  // Очистка ТОЛЬКО акций (Исключая MCFTR и фонды)
+  // Очистка ТОЛЬКО акций (Строго по полю type)
   async clearStockPricesOnly() {
-    await this.prices.filter(p => p.ticker !== 'MCFTR' && !KNOWN_FUNDS.includes(p.ticker)).delete();
-    await this.meta.filter(m => m.key.startsWith('PRICE_') && !m.key.includes('MCFTR') && !KNOWN_FUNDS.some(f => m.key.includes(f))).delete();
+    await this.prices.filter(p => p.type === 'STOCK').delete();
+    // Очищаем метаданные тех ключей, которые не фонды и не индексы
+    const fundsAndIndexMetas = await this.prices.filter(p => p.type === 'FUND' || p.type === 'INDEX').toArray();
+    const keepKeys = fundsAndIndexMetas.map(p => `PRICE_${p.ticker}_${p.date}`);
+    await this.meta.filter(m => m.key.startsWith('PRICE_') && !keepKeys.includes(m.key)).delete();
   }
   
-  // ИСПРАВЛЕНИЕ: Очистка ВСЕХ фондов ликвидности
+  // Очистка ТОЛЬКО фондов (Любых тикеров, сохраненных как фонд)
   async clearFundPricesOnly() {
-    await this.prices.filter(p => KNOWN_FUNDS.includes(p.ticker)).delete();
+    await this.prices.filter(p => p.type === 'FUND').delete();
   }
   
+  // Очистка ТОЛЬКО индексов
   async clearIndicesOnly() {
-    await this.prices.where('ticker').equals('MCFTR').delete();
+    await this.prices.filter(p => p.type === 'INDEX').delete();
   }
   
   async clearDividendsOnly() {

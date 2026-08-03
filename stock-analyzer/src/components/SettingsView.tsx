@@ -135,7 +135,7 @@ export const SettingsView: React.FC = () => {
     showToast('success', 'Правило сплита акции добавлено');
   };
 
-  const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
+const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
     if (!window.confirm('Очистить выбранный рыночный кэш? (Ваши портфели останутся в сохранности)')) return;
 
     switch (type) {
@@ -157,6 +157,10 @@ export const SettingsView: React.FC = () => {
     }
 
     await loadStats();
+    
+    // ИСПРАВЛЕНИЕ: Сбрасываем кэш расчётов после очистки базы!
+    usePortfolioStore.getState().clearCalculationCache();
+    
     showToast('success', 'Выбранный кэш очищен. При просмотре портфелей котировки скачаются заново.');
   };
 
