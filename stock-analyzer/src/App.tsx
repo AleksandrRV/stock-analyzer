@@ -16,22 +16,23 @@ export function App() {
     loadFromStorage();
   }, [loadFromStorage]);
 
+  // Активация ориентации при первом же касании любого места на смартфоне
   useEffect(() => {
-    const applyOrientation = async () => {
+    const handleFirstTouch = async () => {
       if (!screen.orientation || !('lock' in screen.orientation)) return;
       try {
         if (settings.orientation === 'portrait') {
-          await (screen.orientation as any).lock('portrait');
+          await (screen.orientation as any).lock('portrait-primary');
         } else if (settings.orientation === 'landscape') {
-          await (screen.orientation as any).lock('landscape');
-        } else {
-          screen.orientation.unlock();
+          await (screen.orientation as any).lock('landscape-primary');
         }
       } catch (e) {
-        console.warn('Orientation lock failed:', e);
+        // Ignored if unsupported
       }
     };
-    applyOrientation();
+
+    window.addEventListener('touchstart', handleFirstTouch, { once: true });
+    return () => window.removeEventListener('touchstart', handleFirstTouch);
   }, [settings.orientation]);
 
   return (
@@ -53,7 +54,7 @@ export function App() {
           </main>
 
           <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.1.0
+            MOEX Strategy Analyzer PWA &bull; v1.1.2
           </footer>
         </div>
       </ThemeProvider>

@@ -65,6 +65,28 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // ФИКСАЦИЯ ОРИЕНТАЦИИ СТРОГО ВНУТРИ ПОЛЬЗОВАТЕЛЬСКОГО ТАПА
+  const handleSetOrientation = async (mode: ScreenOrientation) => {
+    updateSettings({ orientation: mode });
+
+    if (screen.orientation && 'lock' in screen.orientation) {
+      try {
+        if (mode === 'portrait') {
+          await (screen.orientation as any).lock('portrait-primary');
+          showToast('success', 'Ориентация зафиксирована: Вертикально');
+        } else if (mode === 'landscape') {
+          await (screen.orientation as any).lock('landscape-primary');
+          showToast('success', 'Ориентация зафиксирована: Горизонтально');
+        } else {
+          screen.orientation.unlock();
+          showToast('success', 'Ориентация: Автоматически');
+        }
+      } catch (err) {
+        console.warn('Screen orientation lock failed (requires PWA mode):', err);
+      }
+    }
+  };
+
   const handleExport = async () => {
     const exportPayload: IExportData = {
       schemaVersion: 1, exportedAt: new Date().toISOString(), settings, groups, portfolios,
@@ -221,16 +243,20 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА */}
+      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА (ПРИВЯЗКА К ПОЛЬЗОВАТЕЛЬСКОМУ ТАПУ) */}
       {isMobile && (
         <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
           <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
             <div className="p-2 bg-teal-500/10 text-teal-500 rounded-xl"><Smartphone className="w-5 h-5" /></div>
-            <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Работает на смартфонах при установке PWA</p></div>
+            <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Фиксация положения смартфона</p></div>
           </div>
           <div className="flex gap-2 pt-2">
             {(['auto', 'portrait', 'landscape'] as ScreenOrientation[]).map(mode => (
-              <button key={mode} onClick={() => updateSettings({ orientation: mode })} className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}>
+              <button 
+                key={mode} 
+                onClick={() => handleSetOrientation(mode)} 
+                className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+              >
                 {mode === 'auto' ? 'Авто' : mode === 'portrait' ? 'Вертикально' : 'Горизонтально'}
               </button>
             ))}
