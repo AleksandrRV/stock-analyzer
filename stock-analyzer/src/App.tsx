@@ -19,46 +19,45 @@ export function App() {
   // Глобальное управление ориентацией экрана
   useEffect(() => {
     const applyOrientation = async () => {
-      if (!screen.orientation || !('lock' in screen.orientation)) return;
+      if (!window.screen?.orientation?.lock) return;
       
       try {
         if (settings.orientation === 'portrait') {
-          await (screen.orientation as any).lock('portrait');
+          await screen.orientation.lock('portrait');
         } else if (settings.orientation === 'landscape') {
-          await (screen.orientation as any).lock('landscape');
-        } else if (settings.orientation === 'auto') {
+          await screen.orientation.lock('landscape');
+        } else {
           screen.orientation.unlock();
         }
       } catch (err) {
-        // Ошибка часто возникает если приложение не в полноэкранном режиме (PWA)
-        console.warn('Failed to lock orientation:', err);
+        // Ошибка ожидаема, если не было взаимодействия с DOM или режим не Standalone
+        console.warn('Orientation lock failed:', err);
       }
     };
 
-    // 1. Попытка немедленной фиксации (сработает если уже был жест)
+    // 1. Пытаемся применить сразу (если это повторный рендер)
     applyOrientation();
 
-    // 2. Фиксация при первом же касании (требование браузеров для безопасности)
-    const handleGesture = () => {
+    // 2. Вешаем слушатель на любое взаимодействие (User Gesture)
+    // Это критично для Chrome на Android
+    const handleUserInteraction = () => {
       applyOrientation();
-      window.removeEventListener('touchstart', handleGesture);
-      window.removeEventListener('mousedown', handleGesture);
+      // Не удаляем слушатель, чтобы при смене настроек "на лету" блокировка тоже срабатывала
     };
-    window.addEventListener('touchstart', handleGesture);
-    window.addEventListener('mousedown', handleGesture);
 
-    // 3. Повторная фиксация при возврате в приложение (resume)
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        applyOrientation();
-      }
+    window.addEventListener('touchstart', handleUserInteraction);
+    window.addEventListener('mousedown', handleUserInteraction);
+    
+    // 3. Обработка возврата в приложение из фонового режима
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') applyOrientation();
     };
-    document.addEventListener('visibilitychange', handleVisibility);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      window.removeEventListener('touchstart', handleGesture);
-      window.removeEventListener('mousedown', handleGesture);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('touchstart', handleUserInteraction);
+      window.removeEventListener('mousedown', handleUserInteraction);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [settings.orientation]);
 
@@ -81,7 +80,7 @@ export function App() {
           </main>
 
           <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.1.3
+            MOEX Strategy Analyzer PWA &bull; v1.1.4
           </footer>
         </div>
       </ThemeProvider>

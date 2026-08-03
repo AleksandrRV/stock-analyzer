@@ -68,20 +68,20 @@ export const SettingsView: React.FC = () => {
   const handleSetOrientation = async (mode: ScreenOrientation) => {
     updateSettings({ orientation: mode });
 
-    if (screen.orientation && 'lock' in screen.orientation) {
+    if (window.screen?.orientation?.lock) {
       try {
         if (mode === 'portrait') {
-          await (screen.orientation as any).lock('portrait');
+          await screen.orientation.lock('portrait');
           showToast('success', 'Ориентация зафиксирована: Вертикально');
         } else if (mode === 'landscape') {
-          await (screen.orientation as any).lock('landscape');
+          await screen.orientation.lock('landscape');
           showToast('success', 'Ориентация зафиксирована: Горизонтально');
         } else {
           screen.orientation.unlock();
-          showToast('success', 'Ориентация: Автоматически');
+          showToast('success', 'Ориентация: Автоматически (системная)');
         }
       } catch (err) {
-        console.warn('Screen orientation lock failed (requires PWA standalone mode):', err);
+        console.warn('Manual orientation lock failed:', err);
       }
     }
   };
@@ -256,7 +256,7 @@ export const SettingsView: React.FC = () => {
                 onClick={() => handleSetOrientation(mode)} 
                 className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
               >
-                {mode === 'auto' ? 'Авто' : mode === 'portrait' ? 'Вертикально' : 'Горизонтально'}
+                {mode === 'auto' ? 'Авто (Система)' : mode === 'portrait' ? 'Вертикально' : 'Горизонтально'}
               </button>
             ))}
           </div>
