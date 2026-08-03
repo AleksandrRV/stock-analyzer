@@ -57,7 +57,6 @@ export const SettingsView: React.FC = () => {
 
   useEffect(() => { 
     loadStats(); 
-    // Детекция мобильного устройства (для показа ориентации)
     setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   }, []);
 
@@ -189,7 +188,7 @@ export const SettingsView: React.FC = () => {
         </div>
 
         <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 space-y-4">
-          <div><h4 className="font-semibold text-sm">Сплиты и консолидации акций</h4><p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые</p></div>
+          <div><h4 className="font-semibold text-sm flex items-center gap-1.5"><Scissors className="w-4 h-4 text-amber-500" /><span>Сплиты и консолидации акций</span></h4><p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые</p></div>
           <form onSubmit={handleAddSplit} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
             <input type="text" required placeholder="Тикер (TRNFP)" value={splitTicker} onChange={e => setSplitTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
             <input type="date" required value={splitDate} onChange={e => setSplitDate(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
@@ -222,7 +221,7 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА (ТОЛЬКО НА МОБИЛЬНЫХ УСТРОЙСТВАХ - В САМОМ НИЗУ) */}
+      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА */}
       {isMobile && (
         <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
           <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
