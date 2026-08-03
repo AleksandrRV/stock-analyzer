@@ -19,15 +19,16 @@ export function App() {
   // Глобальное управление ориентацией экрана
   useEffect(() => {
     const applyOrientation = async () => {
-      if (!window.screen?.orientation?.lock) return;
+      const orientation = window.screen?.orientation as any;
+      if (!orientation || !orientation.lock) return;
       
       try {
         if (settings.orientation === 'portrait') {
-          await screen.orientation.lock('portrait');
+          await orientation.lock('portrait');
         } else if (settings.orientation === 'landscape') {
-          await screen.orientation.lock('landscape');
-        } else {
-          screen.orientation.unlock();
+          await orientation.lock('landscape');
+        } else if (settings.orientation === 'auto') {
+          orientation.unlock();
         }
       } catch (err) {
         // Ошибка ожидаема, если не было взаимодействия с DOM или режим не Standalone
@@ -35,29 +36,27 @@ export function App() {
       }
     };
 
-    // 1. Пытаемся применить сразу (если это повторный рендер)
+    // 1. Попытка немедленного применения
     applyOrientation();
 
-    // 2. Вешаем слушатель на любое взаимодействие (User Gesture)
-    // Это критично для Chrome на Android
-    const handleUserInteraction = () => {
+    // 2. Слушатели для "оживления" блокировки при взаимодействии (нужно для Chrome Android)
+    const handleGesture = () => {
       applyOrientation();
-      // Не удаляем слушатель, чтобы при смене настроек "на лету" блокировка тоже срабатывала
     };
 
-    window.addEventListener('touchstart', handleUserInteraction);
-    window.addEventListener('mousedown', handleUserInteraction);
+    window.addEventListener('touchstart', handleGesture);
+    window.addEventListener('mousedown', handleGesture);
     
-    // 3. Обработка возврата в приложение из фонового режима
-    const handleVisibilityChange = () => {
+    // 3. Обработка возврата в приложение (Resume)
+    const handleVisibility = () => {
       if (document.visibilityState === 'visible') applyOrientation();
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
-      window.removeEventListener('touchstart', handleUserInteraction);
-      window.removeEventListener('mousedown', handleUserInteraction);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('touchstart', handleGesture);
+      window.removeEventListener('mousedown', handleGesture);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [settings.orientation]);
 

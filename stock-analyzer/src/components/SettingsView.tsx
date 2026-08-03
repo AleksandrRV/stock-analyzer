@@ -68,16 +68,17 @@ export const SettingsView: React.FC = () => {
   const handleSetOrientation = async (mode: ScreenOrientation) => {
     updateSettings({ orientation: mode });
 
-    if (window.screen?.orientation?.lock) {
+    const orientation = window.screen?.orientation as any;
+    if (orientation && orientation.lock) {
       try {
         if (mode === 'portrait') {
-          await screen.orientation.lock('portrait');
+          await orientation.lock('portrait');
           showToast('success', 'Ориентация зафиксирована: Вертикально');
         } else if (mode === 'landscape') {
-          await screen.orientation.lock('landscape');
+          await orientation.lock('landscape');
           showToast('success', 'Ориентация зафиксирована: Горизонтально');
         } else {
-          screen.orientation.unlock();
+          orientation.unlock();
           showToast('success', 'Ориентация: Автоматически (системная)');
         }
       } catch (err) {
