@@ -15,12 +15,16 @@ export interface ICachedMatrix {
   result: IMonthlyMatrixRow[];
 }
 
+export type OpenPortfolioMode = 'default' | 'analytics';
+
 interface PortfolioState {
   portfolios: IPortfolio[];
   groups: IPortfolioGroup[];
   settings: IGlobalSettings;
   activeGroupId: string | null;
+  
   selectedPortfolioId: string | null;
+  openPortfolioMode: OpenPortfolioMode;
   
   calculationsCache: Record<string, ICachedCalculation>;
   matrixCache: Record<string, ICachedMatrix>;
@@ -30,7 +34,7 @@ interface PortfolioState {
   clearCalculationCache: (portfolioId?: string) => void;
 
   loadFromStorage: () => void;
-  setSelectedPortfolioId: (id: string | null) => void;
+  openPortfolio: (id: string | null, mode?: OpenPortfolioMode) => void;
   
   updateSettings: (newSettings: Partial<IGlobalSettings>) => void;
   addCustomTickerRename: (rename: ITickerRename) => void;
@@ -61,9 +65,10 @@ interface PortfolioState {
 export const usePortfolioStore = create<PortfolioState>((set, get) => ({
   portfolios: [],
   groups: [],
-  settings: DEFAULT_SETTINGS,
+  settings: { ...DEFAULT_SETTINGS, orientation: 'auto' },
   activeGroupId: null,
   selectedPortfolioId: null,
+  openPortfolioMode: 'default',
   
   calculationsCache: {},
   matrixCache: {},
@@ -103,7 +108,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     set({ portfolios, groups, settings });
   },
 
-  setSelectedPortfolioId: (id) => set({ selectedPortfolioId: id }),
+  openPortfolio: (id, mode = 'default') => set({ selectedPortfolioId: id, openPortfolioMode: mode }),
 
   setActiveGroupId: (groupId) => set({ activeGroupId: groupId }),
 
@@ -140,14 +145,13 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     get().updateSettings({ stockSplits: updatedSplits });
   },
 
-  // БЕЗОПАСНОЕ ВОССТАНОВЛЕНИЕ ДАННЫХ ПРИ ИМПОРТЕ
   restoreFullData: (data) => {
-    // Безопасное слияние настроек: если в файле нет каких-то полей, берем дефолтные
     const safeSettings: IGlobalSettings = {
       ...DEFAULT_SETTINGS,
       ...data.settings,
       tickerRenames: data.settings?.tickerRenames || [],
       stockSplits: data.settings?.stockSplits || [],
+      orientation: data.settings?.orientation || 'auto',
     };
 
     set({
@@ -161,8 +165,6 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
     UserStorage.saveSettings(safeSettings);
     UserStorage.savePortfolios(data.portfolios || []);
     localStorage.setItem(GROUPS_STORAGE_KEY, JSON.stringify(data.groups || []));
-    
-    // Обязательный сброс кэшей расчетов, чтобы новые портфели пересчитались "с чистого листа"
     get().clearCalculationCache();
   },
 

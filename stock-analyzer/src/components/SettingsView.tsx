@@ -3,7 +3,7 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { marketDb } from '../db/marketDb';
 import { FilePortabilityService } from '../services/storage/filePortability';
 import { DEFAULT_TICKER_RENAMES, DEFAULT_STOCK_SPLITS } from '../engine/TickerResolver';
-import { IExportData } from '../types/domain';
+import { IExportData, ScreenOrientation } from '../types/domain';
 import { ManualDividendsModal } from './modals/ManualDividendsModal';
 
 import { 
@@ -18,7 +18,8 @@ import {
   RefreshCw,
   HardDrive,
   Coins,
-  Scissors
+  Scissors,
+  Smartphone
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -36,15 +37,13 @@ export const SettingsView: React.FC = () => {
 
   const [cacheStats, setCacheStats] = useState({ pricesCount: 0, dividendsCount: 0 });
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
   const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // Поля смены тикера
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
   const [changeDate, setChangeDate] = useState('');
 
-  // Поля сплита
   const [splitTicker, setSplitTicker] = useState('');
   const [splitDate, setSplitDate] = useState('');
   const [splitCoef, setSplitCoef] = useState('');
@@ -56,8 +55,10 @@ export const SettingsView: React.FC = () => {
     setCacheStats(stats);
   };
 
-  useEffect(() => {
-    loadStats();
+  useEffect(() => { 
+    loadStats(); 
+    // Детекция мобильного устройства (для показа ориентации)
+    setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
   }, []);
 
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -67,15 +68,9 @@ export const SettingsView: React.FC = () => {
 
   const handleExport = async () => {
     const exportPayload: IExportData = {
-      schemaVersion: 1,
-      exportedAt: new Date().toISOString(),
-      settings,
-      groups,
-      portfolios,
+      schemaVersion: 1, exportedAt: new Date().toISOString(), settings, groups, portfolios,
     };
-
-    const success = await FilePortabilityService.exportData(exportPayload);
-    if (success) {
+    if (await FilePortabilityService.exportData(exportPayload)) {
       showToast('success', 'Файл резервной копии сохранен!');
     }
   };
@@ -83,19 +78,17 @@ export const SettingsView: React.FC = () => {
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
         const content = event.target?.result as string;
         const importedData = FilePortabilityService.parseImportFile(content);
-        
-        if (window.confirm(`Вы уверены, что хотите восстановить данные? Текущие портфели будут заменены (Портфелей в файле: ${importedData.portfolios.length} шт.)`)) {
+        if (window.confirm(`Восстановить данные? (Портфелей: ${importedData.portfolios.length} шт.)`)) {
           restoreFullData(importedData);
-          showToast('success', 'Данные успешно восстановлены из файла!');
+          showToast('success', 'Данные успешно восстановлены!');
         }
       } catch (err: any) {
-        showToast('error', `Ошибка импорта: ${err.message}`);
+        showToast('error', `Ошибка: ${err.message}`);
       }
     };
     reader.readAsText(file);
@@ -105,383 +98,148 @@ export const SettingsView: React.FC = () => {
   const handleAddRename = (e: React.FormEvent) => {
     e.preventDefault();
     if (!oldTicker || !newTicker || !changeDate) return;
-
-    addCustomTickerRename({
-      oldTicker: oldTicker.trim().toUpperCase(),
-      newTicker: newTicker.trim().toUpperCase(),
-      changeDate: `${changeDate}T00:00:00.000Z`,
-    });
-
-    setOldTicker('');
-    setNewTicker('');
-    setChangeDate('');
-    showToast('success', 'Правило переименования тикера добавлено');
+    addCustomTickerRename({ oldTicker: oldTicker.trim().toUpperCase(), newTicker: newTicker.trim().toUpperCase(), changeDate: `${changeDate}T00:00:00.000Z` });
+    setOldTicker(''); setNewTicker(''); setChangeDate('');
+    showToast('success', 'Правило переименования добавлено');
   };
 
   const handleAddSplit = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedCoef = parseFloat(splitCoef);
     if (!splitTicker || !splitDate || isNaN(parsedCoef) || parsedCoef <= 0) return;
-
-    addCustomSplit({
-      ticker: splitTicker.trim().toUpperCase(),
-      date: `${splitDate}T00:00:00.000Z`,
-      coefficient: parsedCoef,
-    });
-
-    setSplitTicker('');
-    setSplitDate('');
-    setSplitCoef('');
-    showToast('success', 'Правило сплита акции добавлено');
+    addCustomSplit({ ticker: splitTicker.trim().toUpperCase(), date: `${splitDate}T00:00:00.000Z`, coefficient: parsedCoef });
+    setSplitTicker(''); setSplitDate(''); setSplitCoef('');
+    showToast('success', 'Правило сплита добавлено');
   };
 
-const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
-    if (!window.confirm('Очистить выбранный рыночный кэш? (Ваши портфели останутся в сохранности)')) return;
-
+  const handleClearCache = async (type: 'STOCKS' | 'FUNDS' | 'INDICES' | 'DIVIDENDS' | 'ALL') => {
+    if (!window.confirm('Очистить выбранный рыночный кэш?')) return;
     switch (type) {
-      case 'STOCKS':
-        await marketDb.clearStockPricesOnly();
-        break;
-      case 'FUNDS':
-        await marketDb.clearFundPricesOnly();
-        break;
-      case 'INDICES':
-        await marketDb.clearIndicesOnly();
-        break;
-      case 'DIVIDENDS':
-        await marketDb.clearDividendsOnly();
-        break;
-      case 'ALL':
-        await marketDb.clearAllCache();
-        break;
+      case 'STOCKS': await marketDb.clearStockPricesOnly(); break;
+      case 'FUNDS': await marketDb.clearFundPricesOnly(); break;
+      case 'INDICES': await marketDb.clearIndicesOnly(); break;
+      case 'DIVIDENDS': await marketDb.clearDividendsOnly(); break;
+      case 'ALL': await marketDb.clearAllCache(); break;
     }
-
     await loadStats();
-    
-    // ИСПРАВЛЕНИЕ: Сбрасываем кэш расчётов после очистки базы!
     usePortfolioStore.getState().clearCalculationCache();
-    
-    showToast('success', 'Выбранный кэш очищен. При просмотре портфелей котировки скачаются заново.');
+    showToast('success', 'Кэш очищен. Данные скачаются заново.');
   };
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      
       {notification && (
-        <div className={`p-4 rounded-xl border text-sm font-medium flex items-center gap-2 animate-in fade-in ${
-          notification.type === 'success'
-            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-            : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
-        }`}>
+        <div className={`p-4 rounded-xl border text-sm font-medium flex items-center gap-2 animate-in fade-in ${notification.type === 'success' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'}`}>
           {notification.type === 'success' ? <Check className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
           <span>{notification.message}</span>
         </div>
       )}
 
-      {/* 1. РУЧНОЙ ВВОД ДИВИДЕНДОВ */}
+      {/* 1. РУЧНЫЕ ДИВИДЕНДЫ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl">
-              <Coins className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg">Ручной ввод дивидендов</h3>
-              <p className="text-xs text-slate-400">Добавьте дивиденды вручную, если Мосбиржа задерживает их публикацию</p>
-            </div>
+            <div className="p-2 bg-amber-500/10 text-amber-500 rounded-xl"><Coins className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Ручной ввод дивидендов</h3><p className="text-xs text-slate-400">Добавьте если MOEX задерживает публикацию</p></div>
           </div>
-
-          <button
-            onClick={() => setIsManualDivsOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-xl shadow-sm transition-all"
-          >
-            <Coins className="w-4 h-4" />
-            <span>Управление дивидендами</span>
-          </button>
+          <button onClick={() => setIsManualDivsOpen(true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-xl shadow-sm transition-all">Управление</button>
         </div>
       </div>
 
-      {/* 2. ИМПОРТ И ЭКСПОРТ JSON */}
+      {/* 2. ИМПОРТ / ЭКСПОРТ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-          <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl">
-            <HardDrive className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg">Импорт и Экспорт данных (Бэкап)</h3>
-            <p className="text-xs text-slate-400">Сохраняйте стратегии в файл JSON для передачи между устройствами</p>
-          </div>
+          <div className="p-2 bg-indigo-500/10 text-indigo-500 rounded-xl"><HardDrive className="w-5 h-5" /></div>
+          <div><h3 className="font-bold text-lg">Импорт и Экспорт данных (Бэкап)</h3><p className="text-xs text-slate-400">Сохраняйте стратегии в файл JSON для передачи между устройствами</p></div>
         </div>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-          <button
-            onClick={handleExport}
-            className="flex items-center justify-center gap-2 p-4 bg-sky-500 hover:bg-sky-600 text-white font-medium text-sm rounded-xl shadow-sm transition-all"
-          >
-            <Download className="w-5 h-5" />
-            <span>Скачать бэкап (.json)</span>
-          </button>
-
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center gap-2 p-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"
-          >
-            <Upload className="w-5 h-5 text-indigo-500" />
-            <span>Загрузить из файла (.json)</span>
-          </button>
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".json"
-            onChange={handleImportFile}
-            className="hidden"
-          />
+          <button onClick={handleExport} className="flex justify-center gap-2 p-4 bg-sky-500 hover:bg-sky-600 text-white text-sm font-medium rounded-xl shadow-sm transition-all"><Download className="w-5 h-5" />Скачать бэкап (.json)</button>
+          <button onClick={() => fileInputRef.current?.click()} className="flex justify-center gap-2 p-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"><Upload className="w-5 h-5 text-indigo-500" />Загрузить из файла (.json)</button>
+          <input type="file" ref={fileInputRef} accept=".json" onChange={handleImportFile} className="hidden" />
         </div>
       </div>
 
       {/* 3. ГЛОБАЛЬНЫЕ НАСТРОЙКИ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-6 shadow-sm">
         <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-          <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
-            <Sliders className="w-5 h-5" />
-          </div>
-          <div>
-            <h3 className="font-bold text-lg">Глобальные настройки расчетов</h3>
-            <p className="text-xs text-slate-400">Правила, применяемые ко всем портфелям</p>
-          </div>
+          <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl"><Sliders className="w-5 h-5" /></div>
+          <div><h3 className="font-bold text-lg">Глобальные настройки расчетов</h3><p className="text-xs text-slate-400">Правила, применяемые ко всем портфелям</p></div>
         </div>
 
-        {/* Налог на дивиденды с поддержкой 0% */}
         <div className="space-y-2 max-w-xs">
-          <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">
-            Ставка налога на дивиденды (%):
-          </label>
+          <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">Ставка налога на дивиденды (%):</label>
           <div className="flex items-center gap-2">
-            <input
-              type="number"
-              step="1"
-              min="0"
-              max="100"
-              value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate}
-              onChange={e => {
-                const val = e.target.value;
-                if (val === '') {
-                  updateSettings({ dividendTaxRate: 0 });
-                } else {
-                  const parsed = parseFloat(val);
-                  if (!isNaN(parsed) && parsed >= 0 && parsed <= 100) {
-                    updateSettings({ dividendTaxRate: parsed });
-                  }
-                }
-              }}
-              onBlur={e => {
-                const parsed = parseFloat(e.target.value);
-                if (isNaN(parsed)) {
-                  updateSettings({ dividendTaxRate: 0 });
-                }
-              }}
-              className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono font-bold w-28 focus:ring-2 focus:ring-sky-500 focus:outline-none"
-            />
+            <input type="number" step="1" min="0" max="100" value={settings.dividendTaxRate === undefined ? 15 : settings.dividendTaxRate} onChange={e => { const val = e.target.value; if (val === '') updateSettings({ dividendTaxRate: 0 }); else { const p = parseFloat(val); if (!isNaN(p) && p >= 0 && p <= 100) updateSettings({ dividendTaxRate: p }); } }} onBlur={e => { if (isNaN(parseFloat(e.target.value))) updateSettings({ dividendTaxRate: 0 }); }} className="p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-sm font-mono font-bold w-28 focus:ring-2 focus:ring-sky-500" />
             <span className="text-xs text-slate-400">% (по умолчанию 15%)</span>
           </div>
         </div>
 
-        {/* Менеджер смены тикеров */}
-        <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-sm">Машина времени тикеров (Corporate Actions)</h4>
-              <p className="text-xs text-slate-400">Правила переименования акций на Мосбирже</p>
-            </div>
-          </div>
-
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 space-y-4">
+          <div><h4 className="font-semibold text-sm">Переименования тикеров (Corporate Actions)</h4><p className="text-xs text-slate-400">Правила смены тикеров на Мосбирже</p></div>
           <form onSubmit={handleAddRename} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
-            <input
-              type="text"
-              required
-              placeholder="Старый (TCSG)"
-              value={oldTicker}
-              onChange={e => setOldTicker(e.target.value.toUpperCase())}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
-            />
-            <input
-              type="text"
-              required
-              placeholder="Новый (T)"
-              value={newTicker}
-              onChange={e => setNewTicker(e.target.value.toUpperCase())}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
-            />
-            <input
-              type="date"
-              required
-              value={changeDate}
-              onChange={e => setChangeDate(e.target.value)}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
-            />
-            <button
-              type="submit"
-              className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Добавить</span>
-            </button>
+            <input type="text" required placeholder="Старый (TCSG)" value={oldTicker} onChange={e => setOldTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
+            <input type="text" required placeholder="Новый (T)" value={newTicker} onChange={e => setNewTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
+            <input type="date" required value={changeDate} onChange={e => setChangeDate(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
+            <button type="submit" className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"><Plus className="w-3.5 h-3.5" /><span>Добавить</span></button>
           </form>
-
           <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs font-mono pr-1">
-            {(settings.tickerRenames || []).map(rule => (
-              <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 rounded-lg">
-                <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
-                <button onClick={() => removeCustomTickerRename(rule.oldTicker)} className="text-rose-500 hover:text-rose-600">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-
-            {DEFAULT_TICKER_RENAMES.map(rule => (
-              <div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500">
-                <span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span>
-                <span className="text-[10px] text-slate-400 italic">Системное</span>
-              </div>
-            ))}
+            {(settings.tickerRenames || []).map(rule => (<div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 rounded-lg"><span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span><button onClick={() => removeCustomTickerRename(rule.oldTicker)} className="text-rose-500 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button></div>))}
+            {DEFAULT_TICKER_RENAMES.map(rule => (<div key={rule.oldTicker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500"><span>{rule.oldTicker} $\rightarrow$ {rule.newTicker} (с {rule.changeDate.split('T')[0]})</span><span className="text-[10px] text-slate-400 italic">Системное</span></div>))}
           </div>
         </div>
 
-        {/* НОВОЕ: Менеджер сплитов (Splits) */}
-        <div className="space-y-4 pt-4 border-t border-slate-100 dark:border-slate-700/60">
-          <div className="flex items-center justify-between">
-            <div>
-              <h4 className="font-semibold text-sm flex items-center gap-1.5">
-                <Scissors className="w-4 h-4 text-amber-500" />
-                <span>Дробление и консолидация акций (Сплиты)</span>
-              </h4>
-              <p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые (Сплит 1 к 100 = 100. Консолидация = 0.0002)</p>
-            </div>
-          </div>
-
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700/60 space-y-4">
+          <div><h4 className="font-semibold text-sm">Сплиты и консолидации акций</h4><p className="text-xs text-slate-400">Коэффициент = Новые акции / Старые</p></div>
           <form onSubmit={handleAddSplit} className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border border-slate-200 dark:border-slate-700/60 grid grid-cols-1 sm:grid-cols-4 gap-2">
-            <input
-              type="text"
-              required
-              placeholder="Тикер (TRNFP)"
-              value={splitTicker}
-              onChange={e => setSplitTicker(e.target.value.toUpperCase())}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono uppercase"
-            />
-            <input
-              type="date"
-              required
-              value={splitDate}
-              onChange={e => setSplitDate(e.target.value)}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
-            />
-            <input
-              type="number"
-              step="0.0001"
-              required
-              placeholder="Коэфф (100)"
-              value={splitCoef}
-              onChange={e => setSplitCoef(e.target.value)}
-              className="p-2 bg-white dark:bg-slate-800 border rounded-lg text-xs font-mono"
-            />
-            <button
-              type="submit"
-              className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Добавить</span>
-            </button>
+            <input type="text" required placeholder="Тикер (TRNFP)" value={splitTicker} onChange={e => setSplitTicker(e.target.value.toUpperCase())} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono uppercase text-slate-900 dark:text-slate-100" />
+            <input type="date" required value={splitDate} onChange={e => setSplitDate(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
+            <input type="number" step="0.0001" required placeholder="Коэфф (100)" value={splitCoef} onChange={e => setSplitCoef(e.target.value)} className="p-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-xs font-mono text-slate-900 dark:text-slate-100" />
+            <button type="submit" className="p-2 bg-slate-800 dark:bg-slate-700 text-white rounded-lg text-xs font-medium flex items-center justify-center gap-1 hover:bg-slate-700"><Plus className="w-3.5 h-3.5" /><span>Добавить</span></button>
           </form>
-
           <div className="space-y-1.5 max-h-36 overflow-y-auto text-xs font-mono pr-1">
-            {(settings.stockSplits || []).map(split => (
-              <div key={split.ticker} className="flex items-center justify-between p-2 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-lg">
-                <span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span>
-                <button onClick={() => removeCustomSplit(split.ticker)} className="text-rose-500 hover:text-rose-600">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-
-            {DEFAULT_STOCK_SPLITS.map(split => (
-              <div key={split.ticker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500">
-                <span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span>
-                <span className="text-[10px] text-slate-400 italic">Системное</span>
-              </div>
-            ))}
+            {(settings.stockSplits || []).map(split => (<div key={split.ticker} className="flex items-center justify-between p-2 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-lg"><span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span><button onClick={() => removeCustomSplit(split.ticker)} className="text-rose-500 hover:text-rose-600"><Trash2 className="w-3.5 h-3.5" /></button></div>))}
+            {DEFAULT_STOCK_SPLITS.map(split => (<div key={split.ticker} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-500"><span>{split.ticker} &bull; Коэфф: {split.coefficient} (с {split.date.split('T')[0]})</span><span className="text-[10px] text-slate-400 italic">Системное</span></div>))}
           </div>
         </div>
-
       </div>
 
       {/* 4. РЫНОЧНЫЙ КЭШ */}
       <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-lg">Рыночный кэш (IndexedDB)</h3>
-              <p className="text-xs text-slate-400">Сохраненные котировки и дивиденды Мосбиржи</p>
-            </div>
+            <div className="p-2 bg-emerald-500/10 text-emerald-500 rounded-xl"><Database className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Рыночный кэш (IndexedDB)</h3><p className="text-xs text-slate-400">Сохраненные котировки и дивиденды Мосбиржи</p></div>
           </div>
-
-          <div className="text-xs font-mono text-slate-500">
-            Цен: <strong className="text-sky-500">{cacheStats.pricesCount}</strong> | Дивидендов: <strong className="text-emerald-500">{cacheStats.dividendsCount}</strong>
-          </div>
+          <div className="text-xs font-mono text-slate-500">Цен: <strong className="text-sky-500">{cacheStats.pricesCount}</strong> | Дивидендов: <strong className="text-emerald-500">{cacheStats.dividendsCount}</strong></div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-2">
-          <button
-            onClick={() => handleClearCache('STOCKS')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>Цены акций</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('FUNDS')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>Цены фондов (LQDT)</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('INDICES')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>Значения MCFTR</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('DIVIDENDS')}
-            className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"
-          >
-            <span>История дивидендов</span>
-            <RefreshCw className="w-3.5 h-3.5 opacity-60" />
-          </button>
-
-          <button
-            onClick={() => handleClearCache('ALL')}
-            className="p-2.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-bold rounded-xl text-left border border-rose-500/20 transition-all flex items-center justify-between col-span-1 sm:col-span-2 lg:col-span-1"
-          >
-            <span>Очистить весь кэш</span>
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          <button onClick={() => handleClearCache('STOCKS')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>Цены акций</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('FUNDS')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>Цены фондов (LQDT)</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('INDICES')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>Значения MCFTR</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('DIVIDENDS')} className="p-2.5 bg-slate-100 dark:bg-slate-700/60 hover:bg-rose-500/10 hover:text-rose-500 text-slate-800 dark:text-slate-200 text-xs font-medium rounded-xl text-left border border-slate-200 dark:border-slate-700 transition-all flex items-center justify-between"><span>История дивидендов</span><RefreshCw className="w-3.5 h-3.5 opacity-60" /></button>
+          <button onClick={() => handleClearCache('ALL')} className="p-2.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-bold rounded-xl text-left border border-rose-500/20 transition-all flex items-center justify-between col-span-1 sm:col-span-2 lg:col-span-1"><span>Очистить весь кэш</span><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
 
-      {/* МОДАЛКА РУЧНЫХ ДИВИДЕНДОВ */}
-      <ManualDividendsModal
-        isOpen={isManualDivsOpen}
-        onClose={() => setIsManualDivsOpen(false)}
-      />
+      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА (ТОЛЬКО НА МОБИЛЬНЫХ УСТРОЙСТВАХ - В САМОМ НИЗУ) */}
+      {isMobile && (
+        <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
+          <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+            <div className="p-2 bg-teal-500/10 text-teal-500 rounded-xl"><Smartphone className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Работает на смартфонах при установке PWA</p></div>
+          </div>
+          <div className="flex gap-2 pt-2">
+            {(['auto', 'portrait', 'landscape'] as ScreenOrientation[]).map(mode => (
+              <button key={mode} onClick={() => updateSettings({ orientation: mode })} className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}>
+                {mode === 'auto' ? 'Авто' : mode === 'portrait' ? 'Вертикально' : 'Горизонтально'}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
+      <ManualDividendsModal isOpen={isManualDivsOpen} onClose={() => setIsManualDivsOpen(false)} />
     </div>
   );
 };

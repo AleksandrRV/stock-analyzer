@@ -10,12 +10,29 @@ import { PwaInstallPrompt } from './components/common/PwaInstallPrompt';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
-  const { selectedPortfolioId, loadFromStorage } = usePortfolioStore();
+  const { selectedPortfolioId, loadFromStorage, settings } = usePortfolioStore();
 
-  // Глобальная первичная загрузка данных
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
+
+  useEffect(() => {
+    const applyOrientation = async () => {
+      if (!screen.orientation || !('lock' in screen.orientation)) return;
+      try {
+        if (settings.orientation === 'portrait') {
+          await (screen.orientation as any).lock('portrait');
+        } else if (settings.orientation === 'landscape') {
+          await (screen.orientation as any).lock('landscape');
+        } else {
+          screen.orientation.unlock();
+        }
+      } catch (e) {
+        console.warn('Orientation lock failed:', e);
+      }
+    };
+    applyOrientation();
+  }, [settings.orientation]);
 
   return (
     <ErrorBoundary>
@@ -36,7 +53,7 @@ export function App() {
           </main>
 
           <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.0.0 Release Candidate
+            MOEX Strategy Analyzer PWA &bull; v1.1.0
           </footer>
         </div>
       </ThemeProvider>

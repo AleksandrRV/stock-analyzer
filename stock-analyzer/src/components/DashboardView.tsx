@@ -24,7 +24,7 @@ export const DashboardView: React.FC = () => {
     groups,
     activeGroupId,
     setActiveGroupId,
-    setSelectedPortfolioId,
+    openPortfolio,
     createPortfolio,
     renamePortfolio,
     deletePortfolio,
@@ -46,15 +46,11 @@ export const DashboardView: React.FC = () => {
   const visiblePortfolios = getVisiblePortfolios();
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       
-      {/* ВЕРХНЯЯ ПАНЕЛЬ */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Ваши портфели</h2>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Управляйте инвестиционными стратегиями и группами
-          </p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -76,7 +72,6 @@ export const DashboardView: React.FC = () => {
         </div>
       </div>
 
-      {/* ТАБЫ ГРУПП */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 overflow-x-auto pb-2 scrollbar-none">
         <button
           onClick={() => setActiveGroupId(null)}
@@ -128,14 +123,14 @@ export const DashboardView: React.FC = () => {
         </button>
       </div>
 
-      {/* СЕТКА КАРТОЧЕК ПОРТФЕЛЕЙ */}
       {visiblePortfolios.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           {visiblePortfolios.map(portfolio => (
             <PortfolioCard
               key={portfolio.id}
               portfolio={portfolio}
-              onOpen={() => setSelectedPortfolioId(portfolio.id)}
+              onOpen={() => openPortfolio(portfolio.id, 'default')}
+              onOpenAnalytics={() => openPortfolio(portfolio.id, 'analytics')}
               onRename={() => setEditingPortfolio(portfolio)}
               onMove={() => setMovingPortfolio(portfolio)}
               onDelete={() => setDeletingPortfolio(portfolio)}
@@ -157,7 +152,6 @@ export const DashboardView: React.FC = () => {
         </div>
       )}
 
-      {/* СКЛАД: Сворачиваемая песочница */}
       <div className="border-t border-slate-200 dark:border-slate-800 pt-6">
         <button
           onClick={() => setShowDebug(!showDebug)}
@@ -170,7 +164,6 @@ export const DashboardView: React.FC = () => {
         {showDebug && <DebugPanel />}
       </div>
 
-      {/* МОДАЛЬНЫЕ ОКНА */}
       <CreatePortfolioModal
         isOpen={isCreatePortModalOpen}
         onSave={(name) => createPortfolio(name)}

@@ -1,19 +1,22 @@
 export interface IStockSplit {
   ticker: string;
-  date: string; // ISO 8601 UTC
-  coefficient: number; // New Shares / Old Shares
+  date: string;
+  coefficient: number;
 }
 
+export type ScreenOrientation = 'auto' | 'portrait' | 'landscape';
+
 export interface IGlobalSettings {
-  dividendTaxRate: number; // по умолчанию 15%
+  dividendTaxRate: number;
   tickerRenames: ITickerRename[];
   stockSplits?: IStockSplit[];
+  orientation?: ScreenOrientation;
 }
 
 export interface ITickerRename {
   oldTicker: string;
   newTicker: string;
-  changeDate: string; // ISO 8601 UTC
+  changeDate: string;
 }
 
 export type AssetType = 'STOCK' | 'FUND';
@@ -26,7 +29,7 @@ export interface IAssetAllocation {
 
 export interface IMilestone {
   id: string;
-  date: string; // ISO 8601 UTC
+  date: string;
   assets: IAssetAllocation[];
 }
 
@@ -34,8 +37,8 @@ export interface IPortfolio {
   id: string;
   groupId: string | null;
   name: string;
-  createdAt: string; // ISO 8601 UTC
-  closedAt: string | null; // ISO 8601 UTC или null
+  createdAt: string;
+  closedAt: string | null;
   milestones: IMilestone[];
 }
 
@@ -47,16 +50,16 @@ export interface IPortfolioGroup {
 
 export interface IPriceHistory {
   ticker: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   price: number;
-  type?: AssetType | 'INDEX'; // НОВОЕ ПОЛЕ: для точной очистки IndexedDB
+  type?: AssetType | 'INDEX';
 }
 
 export interface IDividendHistory {
   ticker: string;
-  date: string; // YYYY-MM-DD (дата отсечки)
-  value: number; // Грязный дивиденд на 1 акцию
-  isManual?: boolean; // Флаг: внесен вручную
+  date: string;
+  value: number;
+  isManual?: boolean;
 }
 
 export interface IExportData {
