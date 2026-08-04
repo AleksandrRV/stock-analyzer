@@ -8,10 +8,10 @@
 
 ===
 COLLECTED FILES REPORT
-Created: 2026-08-03 14:43:13
+Created: 2026-08-04 08:58:32
 Folders: stock-analyzer
 Extensions: .cs, .mtgn, .js, .bat, .md, .asmdef, .bhl, .txt, .json, .html, .tsx, .css, .ts
-Files: 51
+Files: 52
 ===
 
 CONTENTS
@@ -56,21 +56,22 @@ CONTENTS
   38. stock-analyzer/src/main.tsx
   39. stock-analyzer/src/services/api/MoexApiGateway.ts
   40. stock-analyzer/src/services/api/SmartLabGateway.ts
-  41. stock-analyzer/src/services/engine/PortfolioCalculationService.ts
-  42. stock-analyzer/src/services/storage/filePortability.ts
-  43. stock-analyzer/src/services/storage/userStorage.ts
-  44. stock-analyzer/src/services/sync/MarketDataSyncService.ts
-  45. stock-analyzer/src/store/usePortfolioStore.ts
-  46. stock-analyzer/src/types/domain.ts
-  47. stock-analyzer/src/vite-env.d.ts
-  48. stock-analyzer/tailwind.config.js
-  49. stock-analyzer/tsconfig.json
-  50. stock-analyzer/tsconfig.node.json
-  51. stock-analyzer/vite.config.ts
+  41. stock-analyzer/src/services/device/orientationService.ts
+  42. stock-analyzer/src/services/engine/PortfolioCalculationService.ts
+  43. stock-analyzer/src/services/storage/filePortability.ts
+  44. stock-analyzer/src/services/storage/userStorage.ts
+  45. stock-analyzer/src/services/sync/MarketDataSyncService.ts
+  46. stock-analyzer/src/store/usePortfolioStore.ts
+  47. stock-analyzer/src/types/domain.ts
+  48. stock-analyzer/src/vite-env.d.ts
+  49. stock-analyzer/tailwind.config.js
+  50. stock-analyzer/tsconfig.json
+  51. stock-analyzer/tsconfig.node.json
+  52. stock-analyzer/vite.config.ts
 
 ===
 
-FILE 1/51
+FILE 1/52
 PATH: MasterDocument.md
 ---
 # Мастер-документ проекта: Платформа анализа фондовых стратегий
@@ -150,7 +151,7 @@ PATH: MasterDocument.md
 
 ===
 
-FILE 2/51
+FILE 2/52
 PATH: TechSteck.md
 ---
 # Технологический стек проекта: Анализатор фондовых стратегий
@@ -207,7 +208,7 @@ PATH: TechSteck.md
 
 ===
 
-FILE 3/51
+FILE 3/52
 PATH: archtecture_and_buisnes.md
 ---
 # Архитектурные и бизнес-решения проекта (Architecture & Business Logic Notes)
@@ -302,7 +303,7 @@ PATH: archtecture_and_buisnes.md
 
 ===
 
-FILE 4/51
+FILE 4/52
 PATH: stock-analyzer/index.html
 ---
 <!DOCTYPE html>
@@ -310,8 +311,11 @@ PATH: stock-analyzer/index.html
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Оффлайн анализатор фондовых стратегий MOEX" />
     <title>Анализатор стратегий MOEX</title>
   </head>
@@ -323,7 +327,7 @@ PATH: stock-analyzer/index.html
 
 ===
 
-FILE 5/51
+FILE 5/52
 PATH: stock-analyzer/package-lock.json
 ---
 {
@@ -7749,13 +7753,13 @@ PATH: stock-analyzer/package-lock.json
 
 ===
 
-FILE 6/51
+FILE 6/52
 PATH: stock-analyzer/package.json
 ---
 {
   "name": "stock-strategy-analyzer",
   "private": true,
-  "version": "1.1.4",
+  "version": "1.1.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -7787,7 +7791,7 @@ PATH: stock-analyzer/package.json
 
 ===
 
-FILE 7/51
+FILE 7/52
 PATH: stock-analyzer/postcss.config.js
 ---
 export default {
@@ -7799,7 +7803,7 @@ export default {
 
 ===
 
-FILE 8/51
+FILE 8/52
 PATH: stock-analyzer/src/App.tsx
 ---
 import { useState, useEffect } from 'react';
@@ -7814,63 +7818,19 @@ import { PwaInstallPrompt } from './components/common/PwaInstallPrompt';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard');
-  const { selectedPortfolioId, loadFromStorage, settings } = usePortfolioStore();
+  const { selectedPortfolioId, loadFromStorage } = usePortfolioStore();
 
   useEffect(() => {
     loadFromStorage();
   }, [loadFromStorage]);
 
-  // Глобальное управление ориентацией экрана
-  useEffect(() => {
-    const applyOrientation = async () => {
-      const orientation = window.screen?.orientation as any;
-      if (!orientation || !orientation.lock) return;
-      
-      try {
-        if (settings.orientation === 'portrait') {
-          await orientation.lock('portrait');
-        } else if (settings.orientation === 'landscape') {
-          await orientation.lock('landscape');
-        } else if (settings.orientation === 'auto') {
-          orientation.unlock();
-        }
-      } catch (err) {
-        // Ошибка ожидаема, если не было взаимодействия с DOM или режим не Standalone
-        console.warn('Orientation lock failed:', err);
-      }
-    };
-
-    // 1. Попытка немедленного применения
-    applyOrientation();
-
-    // 2. Слушатели для "оживления" блокировки при взаимодействии (нужно для Chrome Android)
-    const handleGesture = () => {
-      applyOrientation();
-    };
-
-    window.addEventListener('touchstart', handleGesture);
-    window.addEventListener('mousedown', handleGesture);
-    
-    // 3. Обработка возврата в приложение (Resume)
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') applyOrientation();
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      window.removeEventListener('touchstart', handleGesture);
-      window.removeEventListener('mousedown', handleGesture);
-      document.removeEventListener('visibilitychange', handleVisibility);
-    };
-  }, [settings.orientation]);
-
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
+        <div className="app-shell flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
           <Header activeTab={activeTab} setActiveTab={setActiveTab} />
-          
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+          <main className="safe-gutter flex-1 max-w-7xl w-full mx-auto py-6 space-y-6">
             <PwaInstallPrompt />
 
             {activeTab === 'settings' ? (
@@ -7882,8 +7842,8 @@ export function App() {
             )}
           </main>
 
-          <footer className="border-t border-slate-200 dark:border-slate-800 py-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.1.4
+          <footer className="safe-gutter safe-bottom border-t border-slate-200 dark:border-slate-800 pt-4 text-center text-xs text-slate-400 dark:text-slate-500">
+            MOEX Strategy Analyzer PWA &bull; v1.1.6
           </footer>
         </div>
       </ThemeProvider>
@@ -7895,7 +7855,7 @@ export default App;
 
 ===
 
-FILE 9/51
+FILE 9/52
 PATH: stock-analyzer/src/components/DashboardView.tsx
 ---
 import React, { useState } from 'react';
@@ -8111,7 +8071,7 @@ export const DashboardView: React.FC = () => {
 
 ===
 
-FILE 10/51
+FILE 10/52
 PATH: stock-analyzer/src/components/DebugPanel.tsx
 ---
 import React, { useState } from 'react';
@@ -8396,7 +8356,7 @@ export const DebugPanel: React.FC = () => {
 
 ===
 
-FILE 11/51
+FILE 11/52
 PATH: stock-analyzer/src/components/Header.tsx
 ---
 import React from 'react';
@@ -8415,7 +8375,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md transition-colors">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="safe-gutter max-w-7xl mx-auto">
         <div className="flex items-center justify-between h-16">
           
           {/* Логотип и заголовок */}
@@ -8486,7 +8446,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, setActiveTab }) => {
 
 ===
 
-FILE 12/51
+FILE 12/52
 PATH: stock-analyzer/src/components/PortfolioCard.tsx
 ---
 import React from 'react';
@@ -8655,7 +8615,7 @@ export const PortfolioCard: React.FC<Props> = ({
 
 ===
 
-FILE 13/51
+FILE 13/52
 PATH: stock-analyzer/src/components/PortfolioDetailView.tsx
 ---
 import React, { useState } from 'react';
@@ -8998,7 +8958,7 @@ export const PortfolioDetailView: React.FC = () => {
 
 ===
 
-FILE 14/51
+FILE 14/52
 PATH: stock-analyzer/src/components/SettingsView.tsx
 ---
 import React, { useState, useEffect, useRef } from 'react';
@@ -9008,6 +8968,15 @@ import { FilePortabilityService } from '../services/storage/filePortability';
 import { DEFAULT_TICKER_RENAMES, DEFAULT_STOCK_SPLITS } from '../engine/TickerResolver';
 import { IExportData, ScreenOrientation } from '../types/domain';
 import { ManualDividendsModal } from './modals/ManualDividendsModal';
+import {
+  applyOrientationMode,
+  getCurrentOrientationType,
+  isInstalledApp,
+  isOrientationLockAvailable,
+  isTouchDevice,
+  subscribeOrientationType,
+  OrientationFailure
+} from '../services/device/orientationService';
 
 import { 
   Sliders, 
@@ -9042,6 +9011,9 @@ export const SettingsView: React.FC = () => {
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isLockAvailable, setIsLockAvailable] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [orientationType, setOrientationType] = useState('unknown');
 
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
@@ -9060,7 +9032,11 @@ export const SettingsView: React.FC = () => {
 
   useEffect(() => { 
     loadStats(); 
-    setIsMobile('ontouchstart' in window || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+    setIsMobile(isTouchDevice());
+    setIsLockAvailable(isOrientationLockAvailable());
+    setIsStandalone(isInstalledApp());
+    setOrientationType(getCurrentOrientationType());
+    return subscribeOrientationType(setOrientationType);
   }, []);
 
   const showToast = (type: 'success' | 'error', message: string) => {
@@ -9068,26 +9044,24 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  const handleSetOrientation = async (mode: ScreenOrientation) => {
+  const handleSetOrientation = (mode: ScreenOrientation) => {
     updateSettings({ orientation: mode });
 
-    const orientation = window.screen?.orientation as any;
-    if (orientation && orientation.lock) {
-      try {
-        if (mode === 'portrait') {
-          await orientation.lock('portrait');
-          showToast('success', 'Ориентация зафиксирована: Вертикально');
-        } else if (mode === 'landscape') {
-          await orientation.lock('landscape');
-          showToast('success', 'Ориентация зафиксирована: Горизонтально');
-        } else {
-          orientation.unlock();
-          showToast('success', 'Ориентация: Автоматически (системная)');
-        }
-      } catch (err) {
-        console.warn('Manual orientation lock failed:', err);
-      }
+    if (mode === 'auto') {
+      showToast('success', 'Ориентация: системная (как в настройках телефона)');
+    } else {
+      showToast('success', mode === 'portrait' ? 'Ориентация зафиксирована: вертикально' : 'Ориентация зафиксирована: горизонтально');
     }
+
+    applyOrientationMode(mode, (reason: OrientationFailure) => {
+      if (reason === 'not-installed') {
+        showToast('error', 'Фиксация работает только в установленном приложении (PWA)');
+      } else if (reason === 'unsupported') {
+        showToast('error', 'Браузер не поддерживает управление ориентацией');
+      } else {
+        showToast('error', 'Система отклонила фиксацию ориентации');
+      }
+    });
   };
 
   const handleExport = async () => {
@@ -9109,6 +9083,7 @@ export const SettingsView: React.FC = () => {
         const importedData = FilePortabilityService.parseImportFile(content);
         if (window.confirm(`Восстановить данные? (Портфелей: ${importedData.portfolios.length} шт.)`)) {
           restoreFullData(importedData);
+          applyOrientationMode(usePortfolioStore.getState().settings.orientation || 'auto');
           showToast('success', 'Данные успешно восстановлены!');
         }
       } catch (err: any) {
@@ -9246,24 +9221,47 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
-      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА (ПРИВЯЗКА К ПОЛЬЗОВАТЕЛЬСКОМУ ТАПУ) */}
+      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА */}
       {isMobile && (
         <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
-          <div className="flex items-center gap-2.5 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <div className="p-2 bg-teal-500/10 text-teal-500 rounded-xl"><Smartphone className="w-5 h-5" /></div>
-            <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Фиксация положения смартфона</p></div>
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-teal-500/10 text-teal-500 rounded-xl"><Smartphone className="w-5 h-5" /></div>
+              <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Фиксация положения интерфейса на смартфоне</p></div>
+            </div>
+            <div className="text-[10px] font-mono text-slate-400 text-right shrink-0">{orientationType}</div>
           </div>
-          <div className="flex gap-2 pt-2">
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
             {(['auto', 'portrait', 'landscape'] as ScreenOrientation[]).map(mode => (
               <button 
                 key={mode} 
                 onClick={() => handleSetOrientation(mode)} 
-                className={`px-4 py-2 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
+                className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500 shadow-sm' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
               >
-                {mode === 'auto' ? 'Авто (Система)' : mode === 'portrait' ? 'Вертикально' : 'Горизонтально'}
+                {mode === 'auto' ? 'Как в системе' : mode === 'portrait' ? 'Только вертикально' : 'Только горизонтально'}
               </button>
             ))}
           </div>
+
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            Режимы фиксации используют основное положение устройства, поэтому переворот «вверх ногами» невозможен. 
+            Режим «Как в системе» полностью передает управление настройке автоповорота в самом телефоне.
+          </p>
+
+          {!isLockAvailable && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>Браузер не предоставляет Screen Orientation API — фиксация недоступна.</span>
+            </div>
+          )}
+
+          {isLockAvailable && !isStandalone && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>Фиксация ориентации работает только в установленном приложении. Добавьте приложение на главный экран и откройте его с иконки.</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -9274,7 +9272,7 @@ export const SettingsView: React.FC = () => {
 
 ===
 
-FILE 15/51
+FILE 15/52
 PATH: stock-analyzer/src/components/analytics/MonthlyReturnsMatrix.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -9449,7 +9447,7 @@ export const MonthlyReturnsMatrix: React.FC<Props> = ({ portfolio }) => {
 
 ===
 
-FILE 16/51
+FILE 16/52
 PATH: stock-analyzer/src/components/analytics/PortfolioChart.tsx
 ---
 import React, { useState, useEffect, useCallback, useRef } from 'react';
@@ -9769,7 +9767,7 @@ export const PortfolioChart: React.FC<Props> = ({ portfolio, calculatedPortfolio
 
 ===
 
-FILE 17/51
+FILE 17/52
 PATH: stock-analyzer/src/components/common/ErrorBoundary.tsx
 ---
 import { Component, ErrorInfo, ReactNode } from 'react';
@@ -9841,7 +9839,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
 ===
 
-FILE 18/51
+FILE 18/52
 PATH: stock-analyzer/src/components/common/PwaInstallPrompt.tsx
 ---
 import React, { useState } from 'react';
@@ -9888,7 +9886,7 @@ export const PwaInstallPrompt: React.FC = () => {
 
 ===
 
-FILE 19/51
+FILE 19/52
 PATH: stock-analyzer/src/components/milestones/MilestoneEditorModal.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -10187,7 +10185,7 @@ export const MilestoneEditorModal: React.FC<Props> = ({
 
 ===
 
-FILE 20/51
+FILE 20/52
 PATH: stock-analyzer/src/components/modals/ChangeGroupModal.tsx
 ---
 import React from 'react';
@@ -10292,7 +10290,7 @@ export const ChangeGroupModal: React.FC<Props> = ({
 
 ===
 
-FILE 21/51
+FILE 21/52
 PATH: stock-analyzer/src/components/modals/ClosePortfolioModal.tsx
 ---
 import React, { useState } from 'react';
@@ -10383,7 +10381,7 @@ export const ClosePortfolioModal: React.FC<Props> = ({ isOpen, minDateIso, onCon
 
 ===
 
-FILE 22/51
+FILE 22/52
 PATH: stock-analyzer/src/components/modals/ConfirmDeleteModal.tsx
 ---
 import React from 'react';
@@ -10442,7 +10440,7 @@ export const ConfirmDeleteModal: React.FC<Props> = ({ isOpen, portfolioName, onC
 
 ===
 
-FILE 23/51
+FILE 23/52
 PATH: stock-analyzer/src/components/modals/CreateGroupModal.tsx
 ---
 import React, { useState } from 'react';
@@ -10521,7 +10519,7 @@ export const CreateGroupModal: React.FC<Props> = ({ isOpen, onSave, onClose }) =
 
 ===
 
-FILE 24/51
+FILE 24/52
 PATH: stock-analyzer/src/components/modals/CreatePortfolioModal.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -10612,7 +10610,7 @@ export const CreatePortfolioModal: React.FC<Props> = ({
 
 ===
 
-FILE 25/51
+FILE 25/52
 PATH: stock-analyzer/src/components/modals/ManualDividendsModal.tsx
 ---
 import React, { useState, useEffect } from 'react';
@@ -10929,7 +10927,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
 ===
 
-FILE 26/51
+FILE 26/52
 PATH: stock-analyzer/src/constants/config.ts
 ---
 export const APP_CONFIG = {
@@ -10946,7 +10944,7 @@ export const APP_CONFIG = {
 
 ===
 
-FILE 27/51
+FILE 27/52
 PATH: stock-analyzer/src/constants/defaultStocks.ts
 ---
 import { AssetType } from '../types/domain';
@@ -10978,7 +10976,7 @@ export const POPULAR_MOEX_ASSETS: IPopularAsset[] = [
 
 ===
 
-FILE 28/51
+FILE 28/52
 PATH: stock-analyzer/src/context/ThemeContext.tsx
 ---
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -11028,7 +11026,7 @@ export const useTheme = () => {
 
 ===
 
-FILE 29/51
+FILE 29/52
 PATH: stock-analyzer/src/db/marketDb.ts
 ---
 import Dexie, { Table } from 'dexie';
@@ -11190,7 +11188,7 @@ export const marketDb = new MarketDatabase();
 
 ===
 
-FILE 30/51
+FILE 30/52
 PATH: stock-analyzer/src/engine/CalendarAdjuster.ts
 ---
 export class CalendarAdjuster {
@@ -11207,7 +11205,7 @@ export class CalendarAdjuster {
 
 ===
 
-FILE 31/51
+FILE 31/52
 PATH: stock-analyzer/src/engine/DateTimeStandardizer.ts
 ---
 export class DateTimeStandardizer {
@@ -11258,7 +11256,7 @@ export class DateTimeStandardizer {
 
 ===
 
-FILE 32/51
+FILE 32/52
 PATH: stock-analyzer/src/engine/FinancialMath.ts
 ---
 export class FinancialMath {
@@ -11322,7 +11320,7 @@ export class FinancialMath {
 
 ===
 
-FILE 33/51
+FILE 33/52
 PATH: stock-analyzer/src/engine/TickerResolver.ts
 ---
 import { ITickerRename, IStockSplit } from '../types/domain';
@@ -11423,7 +11421,7 @@ export class TickerResolver {
 
 ===
 
-FILE 34/51
+FILE 34/52
 PATH: stock-analyzer/src/hooks/useNetworkStatus.ts
 ---
 import { useState, useEffect } from 'react';
@@ -11449,7 +11447,7 @@ export function useNetworkStatus() {
 
 ===
 
-FILE 35/51
+FILE 35/52
 PATH: stock-analyzer/src/hooks/usePortfolioCalculation.ts
 ---
 import { useState, useEffect } from 'react';
@@ -11502,7 +11500,7 @@ export function usePortfolioCalculation(portfolio: IPortfolio) {
 
 ===
 
-FILE 36/51
+FILE 36/52
 PATH: stock-analyzer/src/hooks/usePwaInstall.ts
 ---
 import { useState, useEffect } from 'react';
@@ -11543,7 +11541,7 @@ export function usePwaInstall() {
 
 ===
 
-FILE 37/51
+FILE 37/52
 PATH: stock-analyzer/src/index.css
 ---
 @tailwind base;
@@ -11556,15 +11554,78 @@ PATH: stock-analyzer/src/index.css
   }
 }
 
+html {
+  height: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+  overscroll-behavior-y: none;
+}
+
+#root {
+  isolation: isolate;
+}
+
+.app-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.safe-gutter {
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@media (min-width: 640px) {
+  .safe-gutter {
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+  }
+}
+
+@media (min-width: 1024px) {
+  .safe-gutter {
+    padding-left: max(2rem, env(safe-area-inset-left));
+    padding-right: max(2rem, env(safe-area-inset-right));
+  }
+}
+
+html.is-rotating,
+html.is-rotating body {
+  scroll-behavior: auto;
+}
+
+html.is-rotating *,
+html.is-rotating *::before,
+html.is-rotating *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
 ===
 
-FILE 38/51
+FILE 38/52
 PATH: stock-analyzer/src/main.tsx
 ---
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
+import { UserStorage } from './services/storage/userStorage';
+import { initOrientationControl } from './services/device/orientationService';
+
+initOrientationControl(UserStorage.getSettings().orientation || 'auto');
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -11574,7 +11635,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
 ===
 
-FILE 39/51
+FILE 39/52
 PATH: stock-analyzer/src/services/api/MoexApiGateway.ts
 ---
 import { IDividendHistory } from '../../types/domain';
@@ -11707,7 +11768,7 @@ export class MoexApiGateway {
 
 ===
 
-FILE 40/51
+FILE 40/52
 PATH: stock-analyzer/src/services/api/SmartLabGateway.ts
 ---
 import { IDividendHistory } from '../../types/domain';
@@ -11832,7 +11893,185 @@ export class SmartLabGateway {
 
 ===
 
-FILE 41/51
+FILE 41/52
+PATH: stock-analyzer/src/services/device/orientationService.ts
+---
+import { ScreenOrientation } from '../../types/domain';
+
+export type OrientationFailure = 'unsupported' | 'not-installed' | 'rejected';
+
+const ROTATING_CLASS = 'is-rotating';
+const ROTATION_SETTLE_MS = 350;
+const REASSERT_DELAY_MS = 150;
+
+const PORTRAIT_TARGETS = ['portrait-primary', 'portrait'];
+const LANDSCAPE_TARGETS = ['landscape-primary', 'landscape'];
+
+let desiredMode: ScreenOrientation = 'auto';
+let isInitialized = false;
+let rotatingTimerId = 0;
+let reassertTimerId = 0;
+
+const getOrientationApi = (): any => {
+  if (typeof window === 'undefined' || !window.screen) return null;
+  return (window.screen as any).orientation || null;
+};
+
+const getTargets = (mode: ScreenOrientation): string[] => {
+  return mode === 'portrait' ? PORTRAIT_TARGETS : LANDSCAPE_TARGETS;
+};
+
+export const isTouchDevice = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+};
+
+export const isInstalledApp = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia('(display-mode: fullscreen)').matches ||
+    window.matchMedia('(display-mode: minimal-ui)').matches ||
+    (navigator as any).standalone === true
+  );
+};
+
+export const isOrientationLockAvailable = (): boolean => {
+  const api = getOrientationApi();
+  return !!api && typeof api.lock === 'function';
+};
+
+export const getCurrentOrientationType = (): string => {
+  const api = getOrientationApi();
+  if (api && api.type) return String(api.type);
+  if (typeof window === 'undefined') return 'unknown';
+  return window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape';
+};
+
+const isSatisfied = (mode: ScreenOrientation): boolean => {
+  if (mode === 'auto') return true;
+  const api = getOrientationApi();
+  if (!api || !api.type) return true;
+  return mode === 'portrait' ? api.type === 'portrait-primary' : api.type === 'landscape-primary';
+};
+
+const classifyError = (error: unknown): OrientationFailure => {
+  const name = error && typeof error === 'object' ? String((error as any).name) : '';
+  return name === 'NotSupportedError' || name === 'SecurityError' ? 'not-installed' : 'rejected';
+};
+
+const markRotating = (): void => {
+  const root = document.documentElement;
+  root.classList.add(ROTATING_CLASS);
+  window.clearTimeout(rotatingTimerId);
+  rotatingTimerId = window.setTimeout(() => root.classList.remove(ROTATING_CLASS), ROTATION_SETTLE_MS);
+};
+
+const lockSequentially = (
+  targets: string[],
+  index: number,
+  onFailure?: (reason: OrientationFailure) => void
+): void => {
+  const api = getOrientationApi();
+  if (!api || index >= targets.length) return;
+
+  const request = api.lock(targets[index]);
+  if (!request || typeof request.catch !== 'function') return;
+
+  request.catch((error: unknown) => {
+    if (index + 1 < targets.length) {
+      lockSequentially(targets, index + 1, onFailure);
+      return;
+    }
+    if (onFailure) onFailure(classifyError(error));
+  });
+};
+
+export const applyOrientationMode = (
+  mode: ScreenOrientation,
+  onFailure?: (reason: OrientationFailure) => void
+): void => {
+  desiredMode = mode;
+  window.clearTimeout(reassertTimerId);
+
+  const api = getOrientationApi();
+  if (!api) {
+    if (onFailure) onFailure('unsupported');
+    return;
+  }
+
+  if (mode === 'auto') {
+    if (typeof api.unlock !== 'function') {
+      if (onFailure) onFailure('unsupported');
+      return;
+    }
+    try {
+      api.unlock();
+    } catch (error) {
+      if (onFailure) onFailure(classifyError(error));
+    }
+    return;
+  }
+
+  if (typeof api.lock !== 'function') {
+    if (onFailure) onFailure('unsupported');
+    return;
+  }
+
+  if (!isSatisfied(mode)) markRotating();
+  lockSequentially(getTargets(mode), 0, onFailure);
+};
+
+const scheduleReassert = (): void => {
+  window.clearTimeout(reassertTimerId);
+  reassertTimerId = window.setTimeout(() => {
+    if (desiredMode === 'auto' || isSatisfied(desiredMode)) return;
+    lockSequentially(getTargets(desiredMode), 0);
+  }, REASSERT_DELAY_MS);
+};
+
+const handleOrientationChange = (): void => {
+  markRotating();
+  scheduleReassert();
+};
+
+const handleVisibilityChange = (): void => {
+  if (document.visibilityState !== 'visible') return;
+  if (desiredMode === 'auto' || isSatisfied(desiredMode)) return;
+  lockSequentially(getTargets(desiredMode), 0);
+};
+
+export const subscribeOrientationType = (listener: (type: string) => void): (() => void) => {
+  const notify = () => listener(getCurrentOrientationType());
+  const api = getOrientationApi();
+
+  if (api && typeof api.addEventListener === 'function') {
+    api.addEventListener('change', notify);
+    return () => api.removeEventListener('change', notify);
+  }
+
+  window.addEventListener('orientationchange', notify);
+  return () => window.removeEventListener('orientationchange', notify);
+};
+
+export const initOrientationControl = (mode: ScreenOrientation): void => {
+  if (isInitialized) return;
+  isInitialized = true;
+
+  const api = getOrientationApi();
+  if (api && typeof api.addEventListener === 'function') {
+    api.addEventListener('change', handleOrientationChange);
+  } else {
+    window.addEventListener('orientationchange', handleOrientationChange);
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+
+  applyOrientationMode(mode);
+};
+
+===
+
+FILE 42/52
 PATH: stock-analyzer/src/services/engine/PortfolioCalculationService.ts
 ---
 import { IPortfolio, AssetType, IGlobalSettings, IAssetAllocation } from '../../types/domain';
@@ -12349,7 +12588,7 @@ export class PortfolioCalculationService {
 
 ===
 
-FILE 42/51
+FILE 43/52
 PATH: stock-analyzer/src/services/storage/filePortability.ts
 ---
 import { IExportData } from '../../types/domain';
@@ -12446,7 +12685,7 @@ export class FilePortabilityService {
 
 ===
 
-FILE 43/51
+FILE 44/52
 PATH: stock-analyzer/src/services/storage/userStorage.ts
 ---
 import { IGlobalSettings, IPortfolio } from '../../types/domain';
@@ -12482,7 +12721,7 @@ export class UserStorage {
 
 ===
 
-FILE 44/51
+FILE 45/52
 PATH: stock-analyzer/src/services/sync/MarketDataSyncService.ts
 ---
 import { marketDb } from '../../db/marketDb';
@@ -12618,7 +12857,7 @@ export class MarketDataSyncService {
 
 ===
 
-FILE 45/51
+FILE 46/52
 PATH: stock-analyzer/src/store/usePortfolioStore.ts
 ---
 import { create } from 'zustand';
@@ -12916,7 +13155,7 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
 
 ===
 
-FILE 46/51
+FILE 47/52
 PATH: stock-analyzer/src/types/domain.ts
 ---
 export interface IStockSplit {
@@ -12993,7 +13232,7 @@ export interface IExportData {
 
 ===
 
-FILE 47/51
+FILE 48/52
 PATH: stock-analyzer/src/vite-env.d.ts
 ---
 /// <reference types="vite/client" />
@@ -13001,7 +13240,7 @@ PATH: stock-analyzer/src/vite-env.d.ts
 
 ===
 
-FILE 48/51
+FILE 49/52
 PATH: stock-analyzer/tailwind.config.js
 ---
 /** @type {import('tailwindcss').Config} */
@@ -13028,7 +13267,7 @@ export default {
 
 ===
 
-FILE 49/51
+FILE 50/52
 PATH: stock-analyzer/tsconfig.json
 ---
 {
@@ -13058,7 +13297,7 @@ PATH: stock-analyzer/tsconfig.json
 
 ===
 
-FILE 50/51
+FILE 51/52
 PATH: stock-analyzer/tsconfig.node.json
 ---
 {
@@ -13074,7 +13313,7 @@ PATH: stock-analyzer/tsconfig.node.json
 
 ===
 
-FILE 51/51
+FILE 52/52
 PATH: stock-analyzer/vite.config.ts
 ---
 import { defineConfig } from 'vite';
@@ -13096,7 +13335,6 @@ export default defineConfig({
         theme_color: '#0f172a',
         background_color: '#0f172a',
         display: 'standalone',
-        orientation: 'any',
         scope: '/stock-analyzer/',
         start_url: '/stock-analyzer/',
         icons: [

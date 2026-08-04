@@ -2,10 +2,9 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import { UserStorage } from './services/storage/userStorage';
-import { initOrientationControl } from './services/device/orientationService';
+import { initRotationSmoother } from './services/device/rotationSmoother';
 
-initOrientationControl(UserStorage.getSettings().orientation || 'auto');
+initRotationSmoother();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

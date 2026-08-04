@@ -3,17 +3,8 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { marketDb } from '../db/marketDb';
 import { FilePortabilityService } from '../services/storage/filePortability';
 import { DEFAULT_TICKER_RENAMES, DEFAULT_STOCK_SPLITS } from '../engine/TickerResolver';
-import { IExportData, ScreenOrientation } from '../types/domain';
+import { IExportData } from '../types/domain';
 import { ManualDividendsModal } from './modals/ManualDividendsModal';
-import {
-  applyOrientationMode,
-  getCurrentOrientationType,
-  isInstalledApp,
-  isOrientationLockAvailable,
-  isTouchDevice,
-  subscribeOrientationType,
-  OrientationFailure
-} from '../services/device/orientationService';
 
 import { 
   Sliders, 
@@ -27,8 +18,7 @@ import {
   RefreshCw,
   HardDrive,
   Coins,
-  Scissors,
-  Smartphone
+  Scissors
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -47,10 +37,6 @@ export const SettingsView: React.FC = () => {
   const [cacheStats, setCacheStats] = useState({ pricesCount: 0, dividendsCount: 0 });
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-  const [isLockAvailable, setIsLockAvailable] = useState(false);
-  const [isStandalone, setIsStandalone] = useState(false);
-  const [orientationType, setOrientationType] = useState('unknown');
 
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
@@ -69,36 +55,11 @@ export const SettingsView: React.FC = () => {
 
   useEffect(() => { 
     loadStats(); 
-    setIsMobile(isTouchDevice());
-    setIsLockAvailable(isOrientationLockAvailable());
-    setIsStandalone(isInstalledApp());
-    setOrientationType(getCurrentOrientationType());
-    return subscribeOrientationType(setOrientationType);
   }, []);
 
   const showToast = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 4000);
-  };
-
-  const handleSetOrientation = (mode: ScreenOrientation) => {
-    updateSettings({ orientation: mode });
-
-    if (mode === 'auto') {
-      showToast('success', 'Ориентация: системная (как в настройках телефона)');
-    } else {
-      showToast('success', mode === 'portrait' ? 'Ориентация зафиксирована: вертикально' : 'Ориентация зафиксирована: горизонтально');
-    }
-
-    applyOrientationMode(mode, (reason: OrientationFailure) => {
-      if (reason === 'not-installed') {
-        showToast('error', 'Фиксация работает только в установленном приложении (PWA)');
-      } else if (reason === 'unsupported') {
-        showToast('error', 'Браузер не поддерживает управление ориентацией');
-      } else {
-        showToast('error', 'Система отклонила фиксацию ориентации');
-      }
-    });
   };
 
   const handleExport = async () => {
@@ -120,7 +81,6 @@ export const SettingsView: React.FC = () => {
         const importedData = FilePortabilityService.parseImportFile(content);
         if (window.confirm(`Восстановить данные? (Портфелей: ${importedData.portfolios.length} шт.)`)) {
           restoreFullData(importedData);
-          applyOrientationMode(usePortfolioStore.getState().settings.orientation || 'auto');
           showToast('success', 'Данные успешно восстановлены!');
         }
       } catch (err: any) {
@@ -257,50 +217,6 @@ export const SettingsView: React.FC = () => {
           <button onClick={() => handleClearCache('ALL')} className="p-2.5 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500 hover:text-white text-xs font-bold rounded-xl text-left border border-rose-500/20 transition-all flex items-center justify-between col-span-1 sm:col-span-2 lg:col-span-1"><span>Очистить весь кэш</span><Trash2 className="w-3.5 h-3.5" /></button>
         </div>
       </div>
-
-      {/* 5. ОРИЕНТАЦИЯ ЭКРАНА */}
-      {isMobile && (
-        <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-700/60 pb-3">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 bg-teal-500/10 text-teal-500 rounded-xl"><Smartphone className="w-5 h-5" /></div>
-              <div><h3 className="font-bold text-lg">Ориентация экрана</h3><p className="text-xs text-slate-400">Фиксация положения интерфейса на смартфоне</p></div>
-            </div>
-            <div className="text-[10px] font-mono text-slate-400 text-right shrink-0">{orientationType}</div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
-            {(['auto', 'portrait', 'landscape'] as ScreenOrientation[]).map(mode => (
-              <button 
-                key={mode} 
-                onClick={() => handleSetOrientation(mode)} 
-                className={`px-4 py-2.5 rounded-xl text-xs font-semibold border transition-all ${settings.orientation === mode ? 'bg-teal-500 text-white border-teal-500 shadow-sm' : 'bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'}`}
-              >
-                {mode === 'auto' ? 'Как в системе' : mode === 'portrait' ? 'Только вертикально' : 'Только горизонтально'}
-              </button>
-            ))}
-          </div>
-
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            Режимы фиксации используют основное положение устройства, поэтому переворот «вверх ногами» невозможен. 
-            Режим «Как в системе» полностью передает управление настройке автоповорота в самом телефоне.
-          </p>
-
-          {!isLockAvailable && (
-            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>Браузер не предоставляет Screen Orientation API — фиксация недоступна.</span>
-            </div>
-          )}
-
-          {isLockAvailable && !isStandalone && (
-            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>Фиксация ориентации работает только в установленном приложении. Добавьте приложение на главный экран и откройте его с иконки.</span>
-            </div>
-          )}
-        </div>
-      )}
 
       <ManualDividendsModal isOpen={isManualDivsOpen} onClose={() => setIsManualDivsOpen(false)} />
     </div>

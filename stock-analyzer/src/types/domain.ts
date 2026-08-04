@@ -4,13 +4,10 @@ export interface IStockSplit {
   coefficient: number;
 }
 
-export type ScreenOrientation = 'auto' | 'portrait' | 'landscape';
-
 export interface IGlobalSettings {
   dividendTaxRate: number;
   tickerRenames: ITickerRename[];
   stockSplits?: IStockSplit[];
-  orientation?: ScreenOrientation;
 }
 
 export interface ITickerRename {

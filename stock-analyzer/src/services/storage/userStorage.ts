@@ -6,7 +6,6 @@ const PORTFOLIOS_KEY = 'app_user_portfolios';
 export const DEFAULT_SETTINGS: IGlobalSettings = {
   dividendTaxRate: 15,
   tickerRenames: [],
-  orientation: 'auto',
 };
 
 export class UserStorage {

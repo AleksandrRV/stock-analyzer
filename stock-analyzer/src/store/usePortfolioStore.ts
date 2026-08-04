@@ -151,7 +151,6 @@ export const usePortfolioStore = create<PortfolioState>((set, get) => ({
       ...data.settings,
       tickerRenames: data.settings?.tickerRenames || [],
       stockSplits: data.settings?.stockSplits || [],
-      orientation: data.settings?.orientation || 'auto',
     };
 
     set({

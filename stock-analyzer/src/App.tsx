@@ -35,7 +35,7 @@ export function App() {
           </main>
 
           <footer className="safe-gutter safe-bottom border-t border-slate-200 dark:border-slate-800 pt-4 text-center text-xs text-slate-400 dark:text-slate-500">
-            MOEX Strategy Analyzer PWA &bull; v1.1.6
+            MOEX Strategy Analyzer PWA &bull; v1.1.7
           </footer>
         </div>
       </ThemeProvider>
