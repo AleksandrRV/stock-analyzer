@@ -1,10 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { IMilestone, IAssetAllocation, AssetType } from '../../types/domain';
 import { DateTimeStandardizer } from '../../engine/DateTimeStandardizer';
-import { TickerResolver } from '../../engine/TickerResolver';
-import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
 import { usePortfolioStore } from '../../store/usePortfolioStore';
-import { Calendar, Plus, Trash2, Scale, AlertCircle, X, HelpCircle } from 'lucide-react';
+import { useMilestoneMarketData } from '../../hooks/useMilestoneMarketData';
+import { AssetPicker } from './AssetPicker';
+import { MilestoneAssetsList, WeightSortDirection } from './MilestoneAssetsList';
+import { MilestoneMcftrPanel } from './MilestoneMcftrPanel';
+import { MilestoneSaveBar } from './MilestoneSaveBar';
+import { Calendar, Scale, AlertCircle, X } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -12,6 +15,12 @@ interface Props {
   onSave: (milestone: IMilestone) => void;
   onClose: () => void;
 }
+
+const toSafeUtcIso = (localDateTime: string): string => {
+  const parsed = new Date(localDateTime);
+  if (isNaN(parsed.getTime())) return '';
+  return DateTimeStandardizer.toUTCISOString(parsed);
+};
 
 export const MilestoneEditorModal: React.FC<Props> = ({
   isOpen,
@@ -26,8 +35,7 @@ export const MilestoneEditorModal: React.FC<Props> = ({
   );
 
   const [assets, setAssets] = useState<IAssetAllocation[]>([]);
-  const [newTickerInput, setNewTickerInput] = useState('');
-  const [newAssetType, setNewAssetType] = useState<AssetType>('STOCK');
+  const [weightSortDirection, setWeightSortDirection] = useState<WeightSortDirection>('DESC');
 
   useEffect(() => {
     if (initialMilestone && !initialMilestone.id.startsWith('new_')) {
@@ -43,7 +51,17 @@ export const MilestoneEditorModal: React.FC<Props> = ({
       setLocalDateTime(DateTimeStandardizer.getLocalDatetimeLocalString());
       setAssets([]);
     }
+    setWeightSortDirection('DESC');
   }, [initialMilestone, isOpen]);
+
+  const targetUtcIso = useMemo(() => toSafeUtcIso(localDateTime), [localDateTime]);
+
+  const { checks, mcftr, isVerifying, invalidTickers, unverifiedTickers } = useMilestoneMarketData(
+    assets,
+    targetUtcIso,
+    settings,
+    isOpen
+  );
 
   if (!isOpen) return null;
 
@@ -52,17 +70,17 @@ export const MilestoneEditorModal: React.FC<Props> = ({
   const freeCashWeight = Math.max(0, Math.round((100 - totalWeight) * 100) / 100);
   const isOverallocated = totalWeight > 100.001;
 
-  const handleAddAsset = (tickerToAdd: string, typeToAdd: AssetType = 'STOCK') => {
+  const handleAddAsset = (tickerToAdd: string, typeToAdd: AssetType = 'STOCK'): boolean => {
     const cleanTicker = tickerToAdd.trim().toUpperCase();
-    if (!cleanTicker) return;
+    if (!cleanTicker) return false;
 
-    if (assets.some(a => a.ticker === cleanTicker)) {
+    if (assets.some(a => a.ticker.trim().toUpperCase() === cleanTicker)) {
       alert(`Актив ${cleanTicker} уже добавлен в список`);
-      return;
+      return false;
     }
 
-    setAssets([...assets, { ticker: cleanTicker, weight: 10, type: typeToAdd }]);
-    setNewTickerInput('');
+    setAssets(prev => [...prev, { ticker: cleanTicker, weight: 10, type: typeToAdd }]);
+    return true;
   };
 
   const handleRemoveAsset = (index: number) => {
@@ -82,16 +100,28 @@ export const MilestoneEditorModal: React.FC<Props> = ({
     setAssets(assets.map(a => ({ ...a, weight: equalWeight })));
   };
 
+  const handleSortByWeight = () => {
+    const direction: WeightSortDirection = weightSortDirection === 'DESC' ? 'ASC' : 'DESC';
+    const sorted = [...assets].sort((a, b) => {
+      const weightA = Number(a.weight) || 0;
+      const weightB = Number(b.weight) || 0;
+      if (weightA !== weightB) return direction === 'DESC' ? weightB - weightA : weightA - weightB;
+      return a.ticker.localeCompare(b.ticker);
+    });
+
+    setAssets(sorted);
+    setWeightSortDirection(direction);
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isOverallocated) return;
+    if (isOverallocated || isVerifying || invalidTickers.length > 0 || !targetUtcIso) return;
 
-    const utcIso = DateTimeStandardizer.toUTCISOString(new Date(localDateTime));
     const isNewPoint = !initialMilestone?.id || initialMilestone.id.startsWith('new_');
 
     const milestoneToSave: IMilestone = {
       id: isNewPoint ? `mst_${Date.now()}_${Math.random().toString(36).substring(2, 5)}` : initialMilestone!.id,
-      date: utcIso,
+      date: targetUtcIso,
       assets: assets.map(a => ({ 
         ...a, 
         ticker: a.ticker.toUpperCase(), 
@@ -103,35 +133,33 @@ export const MilestoneEditorModal: React.FC<Props> = ({
     onClose();
   };
 
-  const targetUtcIso = DateTimeStandardizer.toUTCISOString(new Date(localDateTime));
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-xl max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl w-full max-w-2xl p-4 sm:p-6 space-y-4 shadow-xl max-h-[92vh] flex flex-col overflow-hidden">
         
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl">
+        <div className="flex items-start justify-between gap-2 border-b border-slate-100 dark:border-slate-700/60 pb-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 bg-sky-500/10 text-sky-500 rounded-xl shrink-0">
               <Calendar className="w-5 h-5" />
             </div>
-            <div>
-              <h3 className="text-lg font-bold">
+            <div className="min-w-0">
+              <h3 className="text-base sm:text-lg font-bold truncate">
                 {initialMilestone?.id && !initialMilestone.id.startsWith('new_') 
-                  ? 'Редактировать контрольную точку' 
+                  ? 'Редактировать точку' 
                   : 'Новая контрольная точка'}
               </h3>
-              <p className="text-xs text-slate-400">Укажите дату/час и состав портфеля</p>
+              <p className="text-xs text-slate-400 truncate">Укажите дату/час и состав портфеля</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form onSubmit={handleSave} className="space-y-5 overflow-y-auto pr-1 flex-1">
+        <form onSubmit={handleSave} className="space-y-4 overflow-y-auto overflow-x-hidden flex-1 pr-0.5">
           
           <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between">
+            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 flex items-center justify-between gap-2 flex-wrap">
               <span>Дата и час среза (Локальное время):</span>
               <span className="text-[11px] font-mono text-slate-400">Точность до 1 часа</span>
             </label>
@@ -141,12 +169,12 @@ export const MilestoneEditorModal: React.FC<Props> = ({
               required
               value={localDateTime}
               onChange={e => setLocalDateTime(e.target.value)}
-              className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono focus:ring-2 focus:ring-sky-500"
+              className="w-full min-w-0 p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono focus:ring-2 focus:ring-sky-500"
             />
           </div>
 
-          <div className="p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 rounded-xl space-y-2">
-            <div className="flex items-center justify-between text-xs font-semibold">
+          <div className="p-3 sm:p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/80 rounded-xl space-y-2">
+            <div className="flex items-center justify-between gap-2 text-xs font-semibold flex-wrap">
               <span>Распределение портфеля:</span>
               <span className={isOverallocated ? 'text-rose-500 font-bold' : 'text-slate-600 dark:text-slate-300'}>
                 Занято: {totalWeight.toFixed(2)}% / 100%
@@ -167,7 +195,7 @@ export const MilestoneEditorModal: React.FC<Props> = ({
               )}
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1">
+            <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 pt-1 flex-wrap">
               <span>Свободный кэш (Авто-LQDT): <strong className="text-emerald-500">{freeCashWeight.toFixed(2)}%</strong></span>
               {assets.length > 1 && (
                 <button type="button" onClick={handleAutoRebalance} className="flex items-center gap-1 text-sky-600 dark:text-sky-400 hover:underline font-medium">
@@ -177,115 +205,36 @@ export const MilestoneEditorModal: React.FC<Props> = ({
             </div>
 
             {isOverallocated && (
-              <div className="flex items-center gap-1.5 text-xs text-rose-500 font-medium pt-1">
-                <AlertCircle className="w-4 h-4 shrink-0" />
+              <div className="flex items-start gap-1.5 text-xs text-rose-500 font-medium pt-1">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-px" />
                 <span>Сумма долей превышает 100%! Уменьшите проценты активов.</span>
               </div>
             )}
           </div>
 
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">Добавить бумагу:</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newTickerInput}
-                onChange={e => setNewTickerInput(e.target.value.toUpperCase())}
-                placeholder="Тикер (напр. SBER)"
-                className="flex-1 p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono uppercase"
-              />
-              <select
-                value={newAssetType}
-                onChange={e => setNewAssetType(e.target.value as AssetType)}
-                className="p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-medium"
-              >
-                <option value="STOCK">Акция</option>
-                <option value="FUND">Фонд</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => handleAddAsset(newTickerInput, newAssetType)}
-                className="px-4 py-2 bg-slate-800 dark:bg-slate-700 text-white rounded-xl text-sm font-medium hover:bg-slate-700"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
+          <MilestoneMcftrPanel mcftr={mcftr} />
 
-            <div className="flex items-center gap-1.5 flex-wrap pt-1">
-              <span className="text-[11px] text-slate-400">Быстро:</span>
-              {POPULAR_MOEX_ASSETS.slice(0, 8).map(pop => (
-                <button
-                  key={pop.ticker}
-                  type="button"
-                  onClick={() => handleAddAsset(pop.ticker, pop.type)}
-                  className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 hover:bg-sky-500/10 hover:text-sky-500 text-[11px] font-mono rounded-md border border-slate-200 dark:border-slate-700 transition-colors"
-                >
-                  +{pop.ticker}
-                </button>
-              ))}
-            </div>
-          </div>
+          <AssetPicker onAdd={handleAddAsset} />
 
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-              Состав активов ({assets.length}):
-            </label>
+          <MilestoneAssetsList
+            assets={assets}
+            checks={checks}
+            targetUtcIso={targetUtcIso}
+            tickerRenames={settings.tickerRenames || []}
+            sortDirection={weightSortDirection}
+            onSortByWeight={handleSortByWeight}
+            onWeightChange={handleWeightChange}
+            onRemove={handleRemoveAsset}
+          />
 
-            {assets.length === 0 ? (
-              <div className="text-center py-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-slate-400 text-xs">
-                Портфель пока состоять только из 100% Кэша (LQDT).<br/>Добавьте акции или фонды выше.
-              </div>
-            ) : (
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {assets.map((asset, index) => {
-                  const resolved = TickerResolver.resolveTicker(asset.ticker, targetUtcIso, settings.tickerRenames);
-                  const isRenamed = resolved !== asset.ticker;
-
-                  return (
-                    <div key={asset.ticker} className="flex items-center justify-between p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 rounded-xl text-sm gap-3">
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono font-bold text-sky-500">{asset.ticker}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-slate-400">
-                          {asset.type === 'STOCK' ? 'Акция' : 'Фонд'}
-                        </span>
-                        {isRenamed && (
-                          <span className="text-[10px] text-purple-500 flex items-center gap-1" title="Машина времени тикеров">
-                            <HelpCircle className="w-3 h-3" />
-                            <span>({resolved})</span>
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max="100"
-                            value={asset.weight}
-                            onChange={e => handleWeightChange(index, parseFloat(e.target.value) || 0)}
-                            className="w-20 p-1 bg-slate-50 dark:bg-slate-800 border rounded text-right font-mono text-sm font-semibold"
-                          />
-                          <span className="text-xs text-slate-400">%</span>
-                        </div>
-                        <button type="button" onClick={() => handleRemoveAsset(index)} className="p-1 text-slate-400 hover:text-rose-500 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-700/60">
-            <button type="button" onClick={onClose} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 text-sm font-medium rounded-xl transition-colors">Отмена</button>
-            <button type="submit" disabled={isOverallocated} className="px-5 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-sm font-medium rounded-xl shadow-sm transition-colors">
-              Сохранить точку
-            </button>
-          </div>
+          <MilestoneSaveBar
+            assetCount={assets.length}
+            isVerifying={isVerifying}
+            isOverallocated={isOverallocated}
+            invalidTickers={invalidTickers}
+            unverifiedTickers={unverifiedTickers}
+            onClose={onClose}
+          />
         </form>
       </div>
     </div>

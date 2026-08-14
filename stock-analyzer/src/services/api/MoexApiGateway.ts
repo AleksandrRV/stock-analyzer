@@ -80,6 +80,25 @@ export class MoexApiGateway {
     }
   }
 
+  static async fetchSecurityExists(ticker: string): Promise<boolean | null> {
+    try {
+      const url = `${BASE_URL}/securities/${ticker.toUpperCase()}.json?iss.meta=off&iss.only=description`;
+
+      const response = await fetch(url);
+      if (response.status === 404) return false;
+      if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
+
+      const json = await response.json();
+      const description = json.description;
+
+      if (!description || !description.data) return false;
+      return description.data.length > 0;
+    } catch (error) {
+      console.error(`[MoexApiGateway] Ошибка проверки бумаги ${ticker}:`, error);
+      return null;
+    }
+  }
+
   static async fetchDividends(ticker: string): Promise<IDividendHistory[]> {
     try {
       const url = `${BASE_URL}/securities/${ticker.toUpperCase()}/dividends.json`;

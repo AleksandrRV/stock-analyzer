@@ -3,6 +3,7 @@ import { usePortfolioStore } from '../store/usePortfolioStore';
 import { IMilestone, IAssetAllocation } from '../types/domain';
 import { DateTimeStandardizer } from '../engine/DateTimeStandardizer';
 import { TickerResolver } from '../engine/TickerResolver';
+import { NumberFormatter } from '../engine/NumberFormatter';
 import { MilestoneEditorModal } from './milestones/MilestoneEditorModal';
 import { ClosePortfolioModal } from './modals/ClosePortfolioModal';
 import { usePortfolioCalculation } from '../hooks/usePortfolioCalculation';
@@ -44,6 +45,7 @@ const MilestoneItem: React.FC<{
 
   const allocatedSum = milestone.assets.reduce((sum, a) => sum + Number(a.weight), 0);
   const freeCash = Math.max(0, Math.round((100 - allocatedSum) * 100) / 100);
+  const mcftrDelta = calcMs ? calcMs.mcftrFinishPrice - calcMs.mcftrStartPrice : 0;
 
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/70 rounded-2xl p-4 shadow-sm transition-all">
@@ -160,6 +162,32 @@ const MilestoneItem: React.FC<{
                 <div className="flex justify-between font-bold pt-0.5 border-t border-dashed border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
                   <span>Профит:</span>
                   <span>+{calcMs.lqdtProfitPercent.toFixed(2)}%</span>
+                </div>
+              </div>
+            </div>
+          )}
+          {calcMs && (
+            <div className="sm:col-span-2 md:col-span-3 lg:col-span-4 p-2.5 bg-purple-500/5 dark:bg-purple-500/10 rounded-xl border border-purple-500/20 text-[11px] space-y-1 font-mono">
+              <div className="flex justify-between items-center gap-2">
+                <span className="font-bold text-purple-600 dark:text-purple-400">MCFTR (Бенчмарк)</span>
+                <span className="font-semibold px-1 py-0.5 bg-purple-500/20 text-purple-600 dark:text-purple-400 rounded">Индекс полной доходности</span>
+              </div>
+              <div className="space-y-0.5 text-[10px] text-slate-500 border-t border-purple-500/20 pt-1">
+                <div className="flex justify-between gap-2">
+                  <span>Пункты:</span>
+                  <span>{NumberFormatter.formatIndex(calcMs.mcftrStartPrice)} → {NumberFormatter.formatIndex(calcMs.mcftrFinishPrice)}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span>Изменение:</span>
+                  <span className={mcftrDelta >= 0 ? 'text-emerald-500 font-semibold' : 'text-rose-500 font-semibold'}>
+                    {mcftrDelta >= 0 ? '+' : '−'}{NumberFormatter.formatIndex(Math.abs(mcftrDelta))} п.
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2 font-bold pt-0.5 border-t border-dashed border-purple-500/20">
+                  <span>Профит:</span>
+                  <span className={calcMs.mcftrProfitPercent >= 0 ? 'text-emerald-500' : 'text-rose-500'}>
+                    {calcMs.mcftrProfitPercent >= 0 ? '+' : ''}{calcMs.mcftrProfitPercent.toFixed(2)}%
+                  </span>
                 </div>
               </div>
             </div>
