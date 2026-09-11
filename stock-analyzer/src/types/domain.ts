@@ -8,6 +8,8 @@ export interface IGlobalSettings {
   dividendTaxRate: number;
   tickerRenames: ITickerRename[];
   stockSplits?: IStockSplit[];
+  /** Свой CORS-прокси для загрузки Smart-Lab (необязательно). */
+  smartlabProxyUrl?: string;
 }
 
 export interface ITickerRename {

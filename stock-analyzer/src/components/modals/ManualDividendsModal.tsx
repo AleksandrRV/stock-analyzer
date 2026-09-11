@@ -13,7 +13,7 @@ interface Props {
 }
 
 export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
-  const { loadFromStorage, clearCalculationCache } = usePortfolioStore();
+  const { loadFromStorage, clearCalculationCache, settings } = usePortfolioStore();
 
   const [manualList, setManualList] = useState<IDividendHistory[]>([]);
   const [ticker, setTicker] = useState('');
@@ -94,8 +94,8 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
     try {
       const results = await Promise.allSettled([
-        SmartLabGateway.fetchSmartLabDividends(currentYear),
-        SmartLabGateway.fetchSmartLabDividends(prevYear),
+        SmartLabGateway.fetchSmartLabDividends(currentYear, settings.smartlabProxyUrl),
+        SmartLabGateway.fetchSmartLabDividends(prevYear, settings.smartlabProxyUrl),
       ]);
 
       const allSmartLab: IDividendHistory[] = [];

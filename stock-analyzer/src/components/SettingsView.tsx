@@ -229,6 +229,21 @@ export const SettingsView: React.FC = () => {
             <div><h3 className="font-bold text-lg">Журнал событий (логи)</h3><p className="text-xs text-slate-400">Подробности запросов к бирже и Smart-Lab — для диагностики ошибок</p></div>
           </div>
         </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-semibold text-slate-600 dark:text-slate-300 block">CORS-прокси для Smart-Lab (необязательно):</label>
+          <input
+            type="text"
+            value={settings.smartlabProxyUrl || ''}
+            onChange={e => updateSettings({ smartlabProxyUrl: e.target.value })}
+            placeholder="https://cors.eu.org/  или  https://ваш-хост/?url={url}"
+            className="w-full p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-sky-500"
+          />
+          <p className="text-[11px] text-slate-400">
+            Если публичные прокси заблокированы вашей сетью, укажите свой. Поддерживается префикс вида <span className="font-mono">https://cors.eu.org/</span> (адрес подставляется после него) или шаблон с <span className="font-mono">{"{url}"}</span>, который заменится на закодированный адрес страницы.
+          </p>
+        </div>
+
         <button onClick={() => setIsLogsOpen(true)} className="flex justify-center gap-2 p-4 w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"><FileText className="w-5 h-5 text-sky-500" />Открыть логи</button>
       </div>
 

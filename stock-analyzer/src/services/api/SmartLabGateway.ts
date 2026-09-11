@@ -2,82 +2,55 @@ import { IDividendHistory } from '../../types/domain';
 import { appLogger } from '../logging/appLogger';
 
 const SOURCE = 'SmartLab';
-const REQUEST_TIMEOUT_MS = 20000;
+const REQUEST_TIMEOUT_MS = 12000;
 
-interface IFetchAttempt {
+interface IAttempt {
   label: string;
   url: string;
   extract: (resp: Response) => Promise<string>;
+}
+
+interface IAttemptResult {
+  ok: boolean;
+  html?: string;
 }
 
 /**
  * Шлюз к Smart-Lab: источник резервной истории дивидендов.
  *
  * Smart-Lab не отдаёт заголовки CORS, поэтому прямой запрос из браузера
- * обычно блокируется. Загрузка идёт по цепочке источников:
- *   1) прямой запрос (работает, если CORS разрешён);
- *   2) allorigins /get (JSON-обёртка, поле contents) — основной резерв;
- *   3) allorigins /raw;
- *   4) codetabs proxy.
+ * блокируется. Загрузка идёт по нескольким независимым источникам
+ * (свой прокси → прямой → cors.eu.org → allorigins → codetabs) ПАРАЛЛЕЛЬНО:
+ * побеждает первый, кто вернул валидную страницу. Это устойчивее к блокировке
+ * отдельных публичных прокси и к медленной сети.
  *
  * Каждая попытка подробно логируется через appLogger (URL, статус, ошибка),
  * чтобы сбой можно было диагностировать в «Настройки → Логи».
  */
 export class SmartLabGateway {
-  static async fetchSmartLabDividends(year: number): Promise<IDividendHistory[]> {
+  static async fetchSmartLabDividends(year: number, customProxyUrl?: string): Promise<IDividendHistory[]> {
     const targetUrl = `https://smart-lab.ru/dividends/index?year=${year}`;
-    const encodedTarget = encodeURIComponent(targetUrl);
-
-    const attempts: IFetchAttempt[] = [
-      {
-        label: 'Прямой запрос',
-        url: targetUrl,
-        extract: async resp => resp.text(),
-      },
-      {
-        label: 'allorigins /get',
-        url: `https://api.allorigins.win/get?url=${encodedTarget}`,
-        extract: async resp => {
-          const json = await resp.json();
-          if (json && typeof json.contents === 'string' && json.contents.length > 0) {
-            return json.contents;
-          }
-          throw new Error('В ответе allorigins отсутствует поле contents');
-        },
-      },
-      {
-        label: 'allorigins /raw',
-        url: `https://api.allorigins.win/raw?url=${encodedTarget}`,
-        extract: async resp => resp.text(),
-      },
-      {
-        label: 'codetabs proxy',
-        url: `https://api.codetabs.com/v1/proxy?quest=${encodedTarget}`,
-        extract: async resp => resp.text(),
-      },
-    ];
+    const attempts = this.buildAttempts(targetUrl, customProxyUrl);
 
     const failures: string[] = [];
-    let htmlText = '';
+    let settled = false;
 
-    for (const attempt of attempts) {
+    const tryAttempt = async (attempt: IAttempt): Promise<IAttemptResult> => {
       const startedAt = Date.now();
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
       try {
-        const resp = await fetch(attempt.url, {
-          signal: controller.signal,
-          cache: 'no-cache',
-        });
+        const resp = await fetch(attempt.url, { signal: controller.signal, cache: 'no-cache' });
         clearTimeout(timeoutId);
         const durationMs = Date.now() - startedAt;
+
+        if (settled) return { ok: false };
 
         if (!resp.ok) {
           const errMsg = `HTTP ${resp.status} ${resp.statusText}`;
           appLogger.warn(SOURCE, `${attempt.label}: ошибка запроса — ${errMsg} (${durationMs} мс)`, attempt.url);
           failures.push(`${attempt.label}: ${errMsg}`);
-          continue;
+          return { ok: false };
         }
 
         const text = await attempt.extract(resp);
@@ -88,7 +61,7 @@ export class SmartLabGateway {
             attempt.url,
           );
           failures.push(`${attempt.label}: ответ не похож на страницу дивидендов`);
-          continue;
+          return { ok: false };
         }
 
         appLogger.success(
@@ -96,25 +69,62 @@ export class SmartLabGateway {
           `Дивиденды за ${year}: страница получена через «${attempt.label}» (${text.length} симв., ${durationMs} мс)`,
           attempt.url,
         );
-        htmlText = text;
-        break;
+        return { ok: true, html: text };
       } catch (err: any) {
         clearTimeout(timeoutId);
+        if (settled) return { ok: false };
         const durationMs = Date.now() - startedAt;
         const reason = err?.name === 'AbortError'
           ? `таймаут запроса (${REQUEST_TIMEOUT_MS / 1000} c)`
           : (err?.message || String(err));
         appLogger.warn(SOURCE, `${attempt.label}: запрос не выполнен — ${reason} (${durationMs} мс)`, attempt.url);
         failures.push(`${attempt.label}: ${reason}`);
+        return { ok: false };
       }
-    }
+    };
+
+    // Первый успешный ответ побеждает; остальные запросы игнорируются.
+    const htmlText = await new Promise<string | null>(resolve => {
+      if (attempts.length === 0) {
+        settled = true;
+        resolve(null);
+        return;
+      }
+      let remaining = attempts.length;
+      const finish = (html: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(html);
+      };
+
+      attempts.forEach(attempt => {
+        tryAttempt(attempt)
+          .then(res => {
+            if (settled) return;
+            if (res.ok && res.html) {
+              finish(res.html);
+            } else {
+              remaining -= 1;
+              if (remaining === 0) finish(null);
+            }
+          })
+          .catch(() => {
+            if (settled) return;
+            remaining -= 1;
+            if (remaining === 0) finish(null);
+          });
+      });
+    });
 
     if (!htmlText) {
       const summary = failures.length > 0
         ? `Попытки: ${failures.join(' | ')}`
         : 'Нет доступных источников';
       appLogger.error(SOURCE, `Не удалось загрузить дивиденды за ${year} со Smart-Lab. ${summary}`, targetUrl);
-      throw new Error(`Smart-Lab (${year}): не удалось получить страницу. ${summary}`);
+      throw new Error(
+        `Smart-Lab (${year}): не удалось получить страницу. ${summary}. ` +
+        `Вероятно, публичные CORS-прокси заблокированы вашей сетью — укажите свой прокси в «Настройках».`,
+      );
     }
 
     const rows = this.parseSmartLabHtml(htmlText);
@@ -129,6 +139,63 @@ export class SmartLabGateway {
 
     appLogger.info(SOURCE, `Дивиденды за ${year}: распознано записей — ${rows.length}`);
     return rows;
+  }
+
+  private static buildAttempts(targetUrl: string, customProxyUrl?: string): IAttempt[] {
+    const attempts: IAttempt[] = [];
+
+    const custom = customProxyUrl ? this.buildProxyUrl(customProxyUrl, targetUrl) : '';
+    if (custom) {
+      attempts.push({ label: 'Свой прокси', url: custom, extract: async resp => resp.text() });
+    }
+
+    attempts.push({ label: 'Прямой запрос', url: targetUrl, extract: async resp => resp.text() });
+
+    attempts.push({
+      label: 'cors.eu.org',
+      url: `https://cors.eu.org/${targetUrl}`,
+      extract: async resp => resp.text(),
+    });
+
+    attempts.push({
+      label: 'allorigins /get',
+      url: `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,
+      extract: async resp => {
+        const json = await resp.json();
+        if (json && typeof json.contents === 'string' && json.contents.length > 0) {
+          return json.contents;
+        }
+        throw new Error('В ответе allorigins отсутствует поле contents');
+      },
+    });
+
+    attempts.push({
+      label: 'allorigins /raw',
+      url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+      extract: async resp => resp.text(),
+    });
+
+    attempts.push({
+      label: 'codetabs proxy',
+      url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+      extract: async resp => resp.text(),
+    });
+
+    return attempts;
+  }
+
+  /**
+   * Собирает URL своего прокси. Поддерживаются два формата:
+   *  - префикс:        https://cors.eu.org/            → https://cors.eu.org/<target>
+   *  - шаблон {url}:   https://host/proxy?url={url}    → {url} заменяется на закодированный адрес
+   */
+  private static buildProxyUrl(base: string, target: string): string {
+    const trimmed = base.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('{url}')) {
+      return trimmed.replace('{url}', encodeURIComponent(target));
+    }
+    return `${trimmed.replace(/\/+$/, '')}/${target}`;
   }
 
   /** Проверяем, что полученный HTML действительно страница дивидендов Smart-Lab. */
