@@ -4,8 +4,10 @@ import { marketDb } from '../../db/marketDb';
 import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
 import { SmartLabGateway } from '../../services/api/SmartLabGateway';
+import { BcsDividendsGateway } from '../../services/api/BcsDividendsGateway';
+import { InvestmintGateway } from '../../services/api/InvestmintGateway';
 import { appLogger } from '../../services/logging/appLogger';
-import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X, Globe, Loader2 } from 'lucide-react';
+import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X, Globe, Loader2, Landmark, Newspaper } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
@@ -23,7 +25,9 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
   const [editingKey, setEditingKey] = useState<[string, string] | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [isSmartLabLoading, setIsSmartLabLoading] = useState(false);
+
+  type ImportSource = 'smartlab' | 'bcs' | 'investmint';
+  const [loadingSource, setLoadingSource] = useState<ImportSource | null>(null);
 
   const loadManualList = async () => {
     const list = await marketDb.getAllManualDividends();
@@ -84,55 +88,69 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     loadFromStorage();
   };
 
-  const handleFetchSmartLab = async () => {
-    setIsSmartLabLoading(true);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
+  const fetchSource = async (source: ImportSource): Promise<IDividendHistory[]> => {
+    const proxy = settings.smartlabProxyUrl;
     const currentYear = new Date().getFullYear();
     const prevYear = currentYear - 1;
 
-    try {
+    if (source === 'smartlab') {
       const results = await Promise.allSettled([
-        SmartLabGateway.fetchSmartLabDividends(currentYear, settings.smartlabProxyUrl),
-        SmartLabGateway.fetchSmartLabDividends(prevYear, settings.smartlabProxyUrl),
+        SmartLabGateway.fetchSmartLabDividends(currentYear, proxy),
+        SmartLabGateway.fetchSmartLabDividends(prevYear, proxy),
       ]);
-
-      const allSmartLab: IDividendHistory[] = [];
+      const rows: IDividendHistory[] = [];
       const failures: string[] = [];
-
       results.forEach((res, idx) => {
         const year = idx === 0 ? currentYear : prevYear;
-        if (res.status === 'fulfilled') {
-          allSmartLab.push(...res.value);
-        } else {
-          const reason = (res.reason as any)?.message || String(res.reason);
-          failures.push(`${year}: ${reason}`);
-        }
+        if (res.status === 'fulfilled') rows.push(...res.value);
+        else failures.push(`${year}: ${(res.reason as any)?.message || res.reason}`);
       });
+      if (rows.length === 0 && failures.length > 0) throw new Error(failures.join('\n'));
+      return rows;
+    }
 
-      if (allSmartLab.length === 0) {
-        const details = failures.join('\n') || 'Нет данных';
-        appLogger.error('SmartLab', 'Не удалось загрузить данные со Smart-Lab', details);
-        setErrorMessage(`Не удалось загрузить данные со Smart-Lab. ${details}`);
+    if (source === 'bcs') {
+      return await BcsDividendsGateway.fetchPastDividends([currentYear, prevYear], proxy);
+    }
+
+    // investmint
+    return await InvestmintGateway.fetchPastDividends(proxy);
+  };
+
+  const SOURCE_META: Record<ImportSource, { title: string; detail: string }> = {
+    smartlab: { title: 'Smart-Lab', detail: `${new Date().getFullYear() - 1}–${new Date().getFullYear()}` },
+    bcs: { title: 'BCS Экспресс', detail: 'прошедшие закрытия реестра' },
+    investmint: { title: 'Investmint', detail: 'прошедшие дивиденды' },
+  };
+
+  const handleImport = async (source: ImportSource) => {
+    setLoadingSource(source);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const meta = SOURCE_META[source];
+
+    try {
+      const rows = await fetchSource(source);
+
+      if (rows.length === 0) {
+        appLogger.error(meta.title, 'Источник вернул 0 записей');
+        setErrorMessage(`Не удалось загрузить данные с ${meta.title}: источник вернул 0 записей.`);
         return;
       }
 
-      const res = await marketDb.processSmartLabDividends(allSmartLab);
+      const res = await marketDb.processSmartLabDividends(rows);
 
-      setSuccessMessage(`Smart-Lab (${prevYear}-${currentYear}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}`);
-      appLogger.success('SmartLab', `Импорт дивидендов (${prevYear}-${currentYear}): добавлено ${res.added}, обновлено ${res.updated}, пропущено ${res.skipped}`);
-      if (failures.length > 0) {
-        appLogger.warn('SmartLab', 'Часть годов не загрузилась', failures.join('\n'));
-      }
+      setSuccessMessage(`${meta.title} (${meta.detail}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}`);
+      appLogger.success(meta.title, `Импорт дивидендов: добавлено ${res.added}, обновлено ${res.updated}, пропущено ${res.skipped}`);
       await loadManualList();
       clearCalculationCache();
       loadFromStorage();
     } catch (err: any) {
-      appLogger.error('SmartLab', 'Ошибка при обработке дивидендов Smart-Lab', err?.message || String(err));
-      setErrorMessage(`Ошибка загрузки со Smart-Lab: ${err?.message || err}`);
+      appLogger.error(meta.title, 'Ошибка при загрузке дивидендов', err?.message || String(err));
+      setErrorMessage(`Ошибка загрузки с ${meta.title}: ${err?.message || err}`);
     } finally {
-      setIsSmartLabLoading(false);
+      setLoadingSource(null);
     }
   };
 
@@ -172,30 +190,57 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* КНОПКА ЗАГРУЗКИ СО SMART-LAB */}
-        <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border flex items-center justify-between gap-3">
+        {/* КНОПКИ ЗАГРУЗКИ ИЗ ВНЕШНИХ ИСТОЧНИКОВ */}
+        <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-xl border space-y-2">
           <div className="flex items-center gap-2 text-xs font-semibold">
             <Globe className="w-4 h-4 text-sky-500" />
-            <span>Импорт дивидендов со Smart-Lab</span>
+            <span>Импорт дивидендов из внешних источников</span>
           </div>
-          <button
-            type="button"
-            onClick={handleFetchSmartLab}
-            disabled={isSmartLabLoading}
-            className="px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5"
-          >
-            {isSmartLabLoading ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Загрузка...</span>
-              </>
-            ) : (
-              <>
-                <Globe className="w-3.5 h-3.5" />
-                <span>Загрузить данные со Smart-Lab</span>
-              </>
-            )}
-          </button>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => handleImport('smartlab')}
+              disabled={loadingSource !== null}
+              className="px-3 py-2 bg-sky-500 hover:bg-sky-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+            >
+              {loadingSource === 'smartlab' ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Загрузка...</span></>
+              ) : (
+                <><Globe className="w-3.5 h-3.5" /><span>Smart-Lab</span></>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleImport('bcs')}
+              disabled={loadingSource !== null}
+              className="px-3 py-2 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+            >
+              {loadingSource === 'bcs' ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Загрузка...</span></>
+              ) : (
+                <><Landmark className="w-3.5 h-3.5" /><span>BCS Экспресс</span></>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleImport('investmint')}
+              disabled={loadingSource !== null}
+              className="px-3 py-2 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+            >
+              {loadingSource === 'investmint' ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" /><span>Загрузка...</span></>
+              ) : (
+                <><Newspaper className="w-3.5 h-3.5" /><span>Investmint</span></>
+              )}
+            </button>
+          </div>
+
+          <p className="text-[11px] text-slate-400">
+            Smart-Lab: {SOURCE_META.smartlab.detail} • BCS: {SOURCE_META.bcs.detail} • Investmint: {SOURCE_META.investmint.detail}. Записи добавляются как ручные и автоматически заменяются данными Мосбиржи при их появлении.
+          </p>
         </div>
 
         {errorMessage && (
