@@ -9,3 +9,6 @@ php
 stock-analyzer/node_modules/
 
 tmp/
+
+# Генерируется GitHub Actions при деплое (кэш дивидендов)
+stock-analyzer/dist/dividends/

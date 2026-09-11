@@ -6,6 +6,7 @@ import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
 import { SmartLabGateway } from '../../services/api/SmartLabGateway';
 import { BcsDividendsGateway } from '../../services/api/BcsDividendsGateway';
 import { InvestmintGateway } from '../../services/api/InvestmintGateway';
+import { DividendFeedService, DividendFeedSource } from '../../services/api/DividendFeedService';
 import { appLogger } from '../../services/logging/appLogger';
 import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X, Globe, Loader2, Landmark, Newspaper } from 'lucide-react';
 
@@ -88,8 +89,30 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     loadFromStorage();
   };
 
-  const fetchSource = async (source: ImportSource): Promise<IDividendHistory[]> => {
+  const fetchSource = async (
+    source: ImportSource,
+  ): Promise<{ rows: IDividendHistory[]; generatedAt: string | null }> => {
     const proxy = settings.smartlabProxyUrl;
+
+    // 1) Сначала пробуем статический кэш, который публикует GitHub Actions
+    //    на том же домене (без CORS и прокси).
+    const feedSource: DividendFeedSource = source; // 'smartlab' | 'bcs' | 'investmint'
+    const feed = await DividendFeedService.fetchFeed();
+    if (feed && feed.records && feed.records.length > 0) {
+      const cached = DividendFeedService.bySource(feed, feedSource);
+      if (cached.length > 0) {
+        appLogger.success(
+          'DividendFeed',
+          `Данные для «${feedSource}» взяты из локального кэша (обновлён ${feed.generatedAt}, записей: ${cached.length})`,
+        );
+        return { rows: cached, generatedAt: feed.generatedAt };
+      }
+      if (feed.errors && feed.errors.length > 0) {
+        appLogger.warn('DividendFeed', `В кэше нет записей для «${feedSource}», ошибки сборки кэша: ${feed.errors.join(' | ')}`);
+      }
+    }
+
+    // 2) Fallback: live-загрузка (работает в сетях без блокировок).
     const currentYear = new Date().getFullYear();
     const prevYear = currentYear - 1;
 
@@ -106,15 +129,15 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
         else failures.push(`${year}: ${(res.reason as any)?.message || res.reason}`);
       });
       if (rows.length === 0 && failures.length > 0) throw new Error(failures.join('\n'));
-      return rows;
+      return { rows, generatedAt: null };
     }
 
     if (source === 'bcs') {
-      return await BcsDividendsGateway.fetchPastDividends([currentYear, prevYear], proxy);
+      return { rows: await BcsDividendsGateway.fetchPastDividends([currentYear, prevYear], proxy), generatedAt: null };
     }
 
     // investmint
-    return await InvestmintGateway.fetchPastDividends(proxy);
+    return { rows: await InvestmintGateway.fetchPastDividends(proxy), generatedAt: null };
   };
 
   const SOURCE_META: Record<ImportSource, { title: string; detail: string }> = {
@@ -131,7 +154,7 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     const meta = SOURCE_META[source];
 
     try {
-      const rows = await fetchSource(source);
+      const { rows, generatedAt } = await fetchSource(source);
 
       if (rows.length === 0) {
         appLogger.error(meta.title, 'Источник вернул 0 записей');
@@ -141,7 +164,10 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
 
       const res = await marketDb.processSmartLabDividends(rows);
 
-      setSuccessMessage(`${meta.title} (${meta.detail}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}`);
+      const cacheNote = generatedAt
+        ? ` (из кэша GitHub Actions, обновлён ${new Date(generatedAt).toLocaleString('ru-RU')})`
+        : '';
+      setSuccessMessage(`${meta.title} (${meta.detail}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}${cacheNote}`);
       appLogger.success(meta.title, `Импорт дивидендов: добавлено ${res.added}, обновлено ${res.updated}, пропущено ${res.skipped}`);
       await loadManualList();
       clearCalculationCache();

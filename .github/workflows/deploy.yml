@@ -3,6 +3,10 @@ name: Deploy PWA to GitHub Pages
 on:
   push:
     branches: ['main'] # Если ветка называется master - замените на 'master'
+  schedule:
+    # Автообновление кэша дивидендов: каждый день в 03:00 UTC (06:00 МСК)
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,6 +40,10 @@ jobs:
 
       - name: Build project
         run: npm run build
+        working-directory: ./stock-analyzer
+
+      - name: Fetch dividends (Smart-Lab / Investmint / BCS)
+        run: npm run fetch:dividends
         working-directory: ./stock-analyzer
 
       - name: Setup Pages
