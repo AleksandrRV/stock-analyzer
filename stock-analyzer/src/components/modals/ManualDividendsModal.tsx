@@ -4,6 +4,7 @@ import { marketDb } from '../../db/marketDb';
 import { usePortfolioStore } from '../../store/usePortfolioStore';
 import { POPULAR_MOEX_ASSETS } from '../../constants/defaultStocks';
 import { SmartLabGateway } from '../../services/api/SmartLabGateway';
+import { appLogger } from '../../services/logging/appLogger';
 import { Coins, Plus, Trash2, Edit3, AlertTriangle, Check, X, Globe, Loader2 } from 'lucide-react';
 
 interface Props {
@@ -92,27 +93,44 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
     const prevYear = currentYear - 1;
 
     try {
-      const [divsCurrent, divsPrev] = await Promise.all([
+      const results = await Promise.allSettled([
         SmartLabGateway.fetchSmartLabDividends(currentYear),
         SmartLabGateway.fetchSmartLabDividends(prevYear),
       ]);
 
-      const allSmartLab = [...divsCurrent, ...divsPrev];
+      const allSmartLab: IDividendHistory[] = [];
+      const failures: string[] = [];
+
+      results.forEach((res, idx) => {
+        const year = idx === 0 ? currentYear : prevYear;
+        if (res.status === 'fulfilled') {
+          allSmartLab.push(...res.value);
+        } else {
+          const reason = (res.reason as any)?.message || String(res.reason);
+          failures.push(`${year}: ${reason}`);
+        }
+      });
 
       if (allSmartLab.length === 0) {
-        setErrorMessage('Не удалось загрузить данные со Smart-Lab');
-        setIsSmartLabLoading(false);
+        const details = failures.join('\n') || 'Нет данных';
+        appLogger.error('SmartLab', 'Не удалось загрузить данные со Smart-Lab', details);
+        setErrorMessage(`Не удалось загрузить данные со Smart-Lab. ${details}`);
         return;
       }
 
       const res = await marketDb.processSmartLabDividends(allSmartLab);
 
       setSuccessMessage(`Smart-Lab (${prevYear}-${currentYear}): Добавлено: ${res.added}, Обновлено: ${res.updated}, Пропущено (есть в MOEX): ${res.skipped}`);
+      appLogger.success('SmartLab', `Импорт дивидендов (${prevYear}-${currentYear}): добавлено ${res.added}, обновлено ${res.updated}, пропущено ${res.skipped}`);
+      if (failures.length > 0) {
+        appLogger.warn('SmartLab', 'Часть годов не загрузилась', failures.join('\n'));
+      }
       await loadManualList();
       clearCalculationCache();
       loadFromStorage();
     } catch (err: any) {
-      setErrorMessage(`Ошибка загрузки со Smart-Lab: ${err.message}`);
+      appLogger.error('SmartLab', 'Ошибка при обработке дивидендов Smart-Lab', err?.message || String(err));
+      setErrorMessage(`Ошибка загрузки со Smart-Lab: ${err?.message || err}`);
     } finally {
       setIsSmartLabLoading(false);
     }

@@ -1,4 +1,5 @@
 import { IDividendHistory } from '../../types/domain';
+import { appLogger } from '../logging/appLogger';
 
 const BASE_URL = 'https://iss.moex.com/iss';
 
@@ -16,10 +17,10 @@ export class MoexApiGateway {
     ticker: string,
     mskDateString: string
   ): Promise<IMoexPriceResult | null> {
+    // ИСПРАВЛЕНИЕ: Экранируем пробел перед временем (%20)
+    const url = `${BASE_URL}/engines/stock/markets/shares/securities/${ticker.toUpperCase()}/candles.json?iss.reverse=true&till=${mskDateString}%2023:59:59&interval=24&marketprice_board=1`;
+
     try {
-      // ИСПРАВЛЕНИЕ: Экранируем пробел перед временем (%20)
-      const url = `${BASE_URL}/engines/stock/markets/shares/securities/${ticker.toUpperCase()}/candles.json?iss.reverse=true&till=${mskDateString}%2023:59:59&interval=24&marketprice_board=1`;
-      
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
       
@@ -41,8 +42,10 @@ export class MoexApiGateway {
       const tradeDate = rawDateStr.split(' ')[0];
 
       return { tradeDate, price };
-    } catch (error) {
+    } catch (error: any) {
+      const message = error?.message || String(error);
       console.error(`[MoexApiGateway] Ошибка загрузки цены ${ticker}:`, error);
+      appLogger.error('MOEX', `Не удалось получить цену ${ticker}`, `URL: ${url}\nОшибка: ${message}`);
       return null;
     }
   }
@@ -51,9 +54,9 @@ export class MoexApiGateway {
     fromMskDate: string,
     tillMskDate: string
   ): Promise<IMoexPriceResult | null> {
+    const url = `${BASE_URL}/history/engines/stock/markets/index/securities/MCFTR.json?from=${fromMskDate}&till=${tillMskDate}`;
+
     try {
-      const url = `${BASE_URL}/history/engines/stock/markets/index/securities/MCFTR.json?from=${fromMskDate}&till=${tillMskDate}`;
-      
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
       
@@ -74,16 +77,18 @@ export class MoexApiGateway {
       const price = typeof rawPrice === 'string' ? parseFloat(rawPrice.replace(',', '.')) : Number(rawPrice);
 
       return { tradeDate, price };
-    } catch (error) {
+    } catch (error: any) {
+      const message = error?.message || String(error);
       console.error(`[MoexApiGateway] Ошибка загрузки индекса MCFTR:`, error);
+      appLogger.error('MOEX', 'Не удалось получить значение индекса MCFTR', `URL: ${url}\nОшибка: ${message}`);
       return null;
     }
   }
 
   static async fetchSecurityExists(ticker: string): Promise<boolean | null> {
-    try {
-      const url = `${BASE_URL}/securities/${ticker.toUpperCase()}.json?iss.meta=off&iss.only=description`;
+    const url = `${BASE_URL}/securities/${ticker.toUpperCase()}.json?iss.meta=off&iss.only=description`;
 
+    try {
       const response = await fetch(url);
       if (response.status === 404) return false;
       if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
@@ -93,16 +98,18 @@ export class MoexApiGateway {
 
       if (!description || !description.data) return false;
       return description.data.length > 0;
-    } catch (error) {
+    } catch (error: any) {
+      const message = error?.message || String(error);
       console.error(`[MoexApiGateway] Ошибка проверки бумаги ${ticker}:`, error);
+      appLogger.error('MOEX', `Не удалось проверить бумагу ${ticker}`, `URL: ${url}\nОшибка: ${message}`);
       return null;
     }
   }
 
   static async fetchDividends(ticker: string): Promise<IDividendHistory[]> {
+    const url = `${BASE_URL}/securities/${ticker.toUpperCase()}/dividends.json`;
+
     try {
-      const url = `${BASE_URL}/securities/${ticker.toUpperCase()}/dividends.json`;
-      
       const response = await fetch(url);
       if (!response.ok) throw new Error(`Ошибка сети: ${response.status}`);
       
@@ -138,8 +145,10 @@ export class MoexApiGateway {
       }
 
       return Array.from(resultsMap.values());
-    } catch (error) {
+    } catch (error: any) {
+      const message = error?.message || String(error);
       console.error(`[MoexApiGateway] Ошибка загрузки дивидендов ${ticker}:`, error);
+      appLogger.error('MOEX', `Не удалось получить дивиденды ${ticker}`, `URL: ${url}\nОшибка: ${message}`);
       return [];
     }
   }

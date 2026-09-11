@@ -5,6 +5,7 @@ import { FilePortabilityService } from '../services/storage/filePortability';
 import { DEFAULT_TICKER_RENAMES, DEFAULT_STOCK_SPLITS } from '../engine/TickerResolver';
 import { IExportData } from '../types/domain';
 import { ManualDividendsModal } from './modals/ManualDividendsModal';
+import { LogsModal } from './modals/LogsModal';
 
 import { 
   Sliders, 
@@ -18,7 +19,8 @@ import {
   RefreshCw,
   HardDrive,
   Coins,
-  Scissors
+  Scissors,
+  FileText
 } from 'lucide-react';
 
 export const SettingsView: React.FC = () => {
@@ -37,6 +39,7 @@ export const SettingsView: React.FC = () => {
   const [cacheStats, setCacheStats] = useState({ pricesCount: 0, dividendsCount: 0 });
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [isManualDivsOpen, setIsManualDivsOpen] = useState(false);
+  const [isLogsOpen, setIsLogsOpen] = useState(false);
 
   const [oldTicker, setOldTicker] = useState('');
   const [newTicker, setNewTicker] = useState('');
@@ -218,7 +221,19 @@ export const SettingsView: React.FC = () => {
         </div>
       </div>
 
+      {/* 5. ЛОГИ (ДИАГНОСТИКА) */}
+      <div className="p-6 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700/80 rounded-2xl space-y-4 shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-700/60 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-slate-500/10 text-slate-600 dark:text-slate-300 rounded-xl"><FileText className="w-5 h-5" /></div>
+            <div><h3 className="font-bold text-lg">Журнал событий (логи)</h3><p className="text-xs text-slate-400">Подробности запросов к бирже и Smart-Lab — для диагностики ошибок</p></div>
+          </div>
+        </div>
+        <button onClick={() => setIsLogsOpen(true)} className="flex justify-center gap-2 p-4 w-full bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-medium text-sm rounded-xl transition-all border border-slate-200 dark:border-slate-600"><FileText className="w-5 h-5 text-sky-500" />Открыть логи</button>
+      </div>
+
       <ManualDividendsModal isOpen={isManualDivsOpen} onClose={() => setIsManualDivsOpen(false)} />
+      <LogsModal isOpen={isLogsOpen} onClose={() => setIsLogsOpen(false)} />
     </div>
   );
 };
