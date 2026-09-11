@@ -12,3 +12,4 @@ tmp/
 
 # Генерируется GitHub Actions при деплое (кэш дивидендов)
 stock-analyzer/dist/dividends/
+stock-analyzer/dist/version.json

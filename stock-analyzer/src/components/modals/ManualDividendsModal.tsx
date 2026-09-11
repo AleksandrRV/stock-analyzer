@@ -103,16 +103,24 @@ export const ManualDividendsModal: React.FC<Props> = ({ isOpen, onClose }) => {
       if (cached.length > 0) {
         appLogger.success(
           'DividendFeed',
-          `Данные для «${feedSource}» взяты из локального кэша (обновлён ${feed.generatedAt}, записей: ${cached.length})`,
+          `Данные для «${feedSource}» взяты из кэша GitHub Actions (обновлён ${feed.generatedAt}, записей: ${cached.length})`,
         );
         return { rows: cached, generatedAt: feed.generatedAt };
       }
-      if (feed.errors && feed.errors.length > 0) {
-        appLogger.warn('DividendFeed', `В кэше нет записей для «${feedSource}», ошибки сборки кэша: ${feed.errors.join(' | ')}`);
-      }
+
+      // Кэш есть, но именно для этого источника записей нет — источник не дал
+      // данных при сборке на GitHub. Честно сообщаем причину и не лезем в сеть
+      // (на устройстве без прокси это всё равно не сработает).
+      const sourceErr = (feed.errors || []).find(e => e.toLowerCase().includes(feedSource));
+      appLogger.warn('DividendFeed', `В кэше нет записей для «${feedSource}»: ${sourceErr || 'нет данных'}`);
+      throw new Error(
+        `Источник «${SOURCE_META[source].title}» не дал данных при сборке кэша на GitHub` +
+        (sourceErr ? ` (${sourceErr})` : '') +
+        `. Попробуйте Smart-Lab или Investmint.`,
+      );
     }
 
-    // 2) Fallback: live-загрузка (работает в сетях без блокировок).
+    // 2) Кэша нет (например, не вышла новая версия приложения) — live-загрузка.
     const currentYear = new Date().getFullYear();
     const prevYear = currentYear - 1;
 
