@@ -11,7 +11,7 @@
  */
 
 import { parse } from 'node-html-parser';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -224,6 +224,16 @@ async function main() {
   const outPath = path.resolve(process.cwd(), OUT);
   await mkdir(path.dirname(outPath), { recursive: true });
   await writeFile(outPath, JSON.stringify(feed), 'utf8');
+
+  // Публикуем актуальную версию приложения, чтобы PWA мог предложить обновление.
+  try {
+    const pkg = JSON.parse(await readFile(path.join(process.cwd(), 'package.json'), 'utf8'));
+    const versionOut = path.join(path.dirname(outPath), '..', 'version.json');
+    await writeFile(versionOut, JSON.stringify({ version: pkg.version, generatedAt: now.toISOString() }), 'utf8');
+    console.log(`Версия ${pkg.version} → ${path.relative(process.cwd(), versionOut)}`);
+  } catch (e) {
+    console.warn('Не удалось записать version.json:', e.message);
+  }
 
   console.log(`\nИтог: ${unique.length} записей → ${outPath}`);
   if (errors.length) {
